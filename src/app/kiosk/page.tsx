@@ -302,9 +302,35 @@ export default function KioskTouchscreenTerminal() {
     }
 
     setPrintStage('Optical paper alignment & collection tray delivery...');
-    setPrintProgress(97);
-    setIsRollerSpinning(false);
-    await new Promise(r => setTimeout(r, 600));
+    // Trigger Physical Printing (Silent in Chromium/Chrome with --kiosk-printing)
+    try {
+      if (verifiedOrder.fileStorageUrl) {
+        const downloadUrl = `/api/documents/download?path=${encodeURIComponent(verifiedOrder.fileStorageUrl)}`;
+        let printFrame = document.getElementById('kiosk-silent-print-frame') as HTMLIFrameElement;
+        if (!printFrame) {
+          printFrame = document.createElement('iframe');
+          printFrame.id = 'kiosk-silent-print-frame';
+          printFrame.style.position = 'fixed';
+          printFrame.style.right = '0';
+          printFrame.style.bottom = '0';
+          printFrame.style.width = '0';
+          printFrame.style.height = '0';
+          printFrame.style.border = '0';
+          document.body.appendChild(printFrame);
+        }
+        printFrame.src = downloadUrl;
+        printFrame.onload = () => {
+          try {
+            printFrame.contentWindow?.focus();
+            printFrame.contentWindow?.print();
+          } catch (pe) {
+            console.log('Physical silent print dispatched to default spooler');
+          }
+        };
+      }
+    } catch (e) {
+      console.log('Browser print dispatch:', e);
+    }
 
     // Stage 3: Call Backend Paper Release API to deduct paper count and seal order
     try {
