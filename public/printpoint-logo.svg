@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 76" fill="none">
+  <defs>
+    <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00cf27"/>
+      <stop offset="60%" stop-color="#00a61c"/>
+      <stop offset="100%" stop-color="#008014"/>
+    </linearGradient>
+    <filter id="iconGlow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#00a61c" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- BRAND ICON EMBLEM -->
+  <g filter="url(#iconGlow)">
+    <!-- Squircle Background -->
+    <rect x="4" y="6" width="64" height="64" rx="18" fill="url(#brandGrad)"/>
+    
+    <!-- Outer Subtle Border -->
+    <rect x="4" y="6" width="64" height="64" rx="18" stroke="#ffffff" stroke-width="1.5" stroke-opacity="0.35"/>
+    
+    <!-- Top Paper Input -->
+    <rect x="20" y="16" width="32" height="15" rx="3.5" fill="#ffffff" fill-opacity="0.95"/>
+    
+    <!-- High-Tech ATM Printer Body Slot -->
+    <rect x="14" y="27" width="44" height="18" rx="5" fill="#042712"/>
+    <rect x="19" y="34.5" width="34" height="3" rx="1.5" fill="#4ade80" fill-opacity="0.9"/>
+    
+    <!-- Bottom Dispensing Document with Fold/Corner -->
+    <path d="M22 36H50V56C50 57.5 48.8 58.5 47.3 58.5H24.7C23.2 58.5 22 57.5 22 56V36Z" fill="#ffffff"/>
+    <line x1="26" y1="43" x2="42" y2="43" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round"/>
+    <line x1="26" y1="48" x2="46" y2="48" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round"/>
+    <line x1="26" y1="53" x2="36" y2="53" stroke="#00a61c" stroke-width="2" stroke-linecap="round"/>
+    
+    <!-- Active Green Beacon Point -->
+    <circle cx="51" cy="30" r="2.2" fill="#22c55e"/>
+  </g>
+
+  <!-- LOGO TYPOGRAPHY -->
+  <g transform="translate(80, 0)">
+    <!-- "PrintPoint" Main Brand Name -->
+    <text x="0" y="45" font-family="'Lexend', 'Poppins', -apple-system, sans-serif" font-size="31" font-weight="900" letter-spacing="-0.8">
+      <tspan fill="#050505">Print</tspan><tspan fill="#00a61c">Point</tspan>
+    </text>
+    
+    <!-- Tagline Sub-Strip -->
+    <text x="1" y="61" font-family="'Lexend', 'Poppins', -apple-system, sans-serif" font-size="9" font-weight="800" letter-spacing="2.2" fill="#16a34a">
+      CLOUD ATM NETWORK
+    </text>
+  </g>
+</svg>
