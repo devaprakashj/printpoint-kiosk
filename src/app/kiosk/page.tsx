@@ -35,7 +35,12 @@ import {
   Server,
   Trash2,
   Flame,
-  Radio
+  Radio,
+  Settings,
+  Wrench,
+  Activity,
+  HardDrive,
+  X
 } from 'lucide-react';
 import { Machine } from '@/lib/types';
 import Logo from '@/components/Logo';
@@ -48,6 +53,14 @@ export default function KioskTouchscreenTerminal() {
   const [currentTime, setCurrentTime] = useState<string>('');
   const [isAudioMuted, setIsAudioMuted] = useState<boolean>(false);
   const [showMachineSelector, setShowMachineSelector] = useState<boolean>(false);
+
+  // Hardware Setup & Diagnostics Modal
+  const [showHardwareModal, setShowHardwareModal] = useState<boolean>(false);
+  const [installedPrintersList, setInstalledPrintersList] = useState<{ name: string; port: string; status: string; isDefault?: boolean }[]>([]);
+  const [targetPrinterChoice, setTargetPrinterChoice] = useState<string>('HP LaserJet Professional P1106');
+  const [isTestingPrinter, setIsTestingPrinter] = useState<boolean>(false);
+  const [testPrintSuccess, setTestPrintSuccess] = useState<string>('');
+  const [isSavingPrinter, setIsSavingPrinter] = useState<boolean>(false);
 
   // Kiosk Workflow Steps:
   // 'pin_entry' -> 'searching_order' -> 'order_verified' -> 'printing_in_progress' -> 'job_completed'
@@ -108,6 +121,7 @@ export default function KioskTouchscreenTerminal() {
 
   useEffect(() => {
     loadKiosks();
+    loadHardwarePrinters();
     // Live auto-polling every 3.5 seconds for real-time printer connection & telemetry
     const interval = setInterval(loadKiosks, 3500);
     return () => clearInterval(interval);
@@ -125,6 +139,75 @@ export default function KioskTouchscreenTerminal() {
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Scan & Load Hardware Printers
+  const loadHardwarePrinters = async () => {
+    try {
+      const res = await fetch(`/api/hardware/printers?machine=${selectedMachineCode}&t=${Date.now()}`);
+      const data = await res.json();
+      if (data.success) {
+        if (data.installedPrinters) setInstalledPrintersList(data.installedPrinters);
+        if (data.activePrinter) setTargetPrinterChoice(data.activePrinter);
+      }
+    } catch (e) {
+      console.warn('Hardware scan error:', e);
+    }
+  };
+
+  // Trigger 1-Click Sample Test Page
+  const handleTriggerTestPrint = async () => {
+    setIsTestingPrinter(true);
+    setTestPrintSuccess('');
+    playSound('laser');
+    try {
+      const res = await fetch('/api/hardware/printers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'test_print',
+          printerName: targetPrinterChoice,
+          machineCode: selectedMachineCode,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTestPrintSuccess(`✅ Test Page successfully sent to [${targetPrinterChoice}] spooler!`);
+        playSound('complete');
+      } else {
+        setTestPrintSuccess(`❌ ${data.error || 'Test print failed'}`);
+      }
+    } catch (e) {
+      setTestPrintSuccess('❌ Test print connection error');
+    } finally {
+      setIsTestingPrinter(false);
+    }
+  };
+
+  // Save Selected Printer
+  const handleSaveActivePrinter = async () => {
+    setIsSavingPrinter(true);
+    try {
+      const res = await fetch('/api/hardware/printers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'set_active_printer',
+          printerName: targetPrinterChoice,
+          machineCode: selectedMachineCode,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        playSound('success');
+        loadKiosks();
+        setShowHardwareModal(false);
+      }
+    } catch (e) {
+      console.warn(e);
+    } finally {
+      setIsSavingPrinter(false);
+    }
+  };
 
   // Safe sound trigger
   const playSound = (action: 'key' | 'success' | 'complete' | 'error' | 'laser' | 'roller' | 'dispense') => {
@@ -510,6 +593,21 @@ export default function KioskTouchscreenTerminal() {
               {currentMachine?.currentSheetsRemaining ?? 450} / {currentMachine?.totalCapacitySheets ?? 500}
             </span>
           </div>
+
+          {/* Hardware / Printer Settings Modal Trigger */}
+          <button
+            type="button"
+            onClick={() => {
+              loadHardwarePrinters();
+              setShowHardwareModal(true);
+              playSound('key');
+            }}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-slate-200 bg-white text-slate-700 hover:text-slate-900 hover:bg-slate-50 transition-colors cursor-pointer shadow-2xs font-semibold"
+            title="Hardware & Printer Diagnostics"
+          >
+            <Settings className="h-3.5 w-3.5 text-[#00a61c]" />
+            <span className="hidden lg:inline text-[11px]">Hardware</span>
+          </button>
 
           {/* Audio Toggle */}
           <button
@@ -1065,6 +1163,189 @@ export default function KioskTouchscreenTerminal() {
           PrintIt Self-Service ATM • 24/7 Helpline: <span className="text-slate-900 font-bold">1800-PRINT-IT</span>
         </div>
       </footer>
+
+      {/* ================= HARDWARE & PRINTER CONNECTION SETTINGS MODAL ================= */}
+      {showHardwareModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-lg w-full p-5 sm:p-6 space-y-4 animate-scale-up max-h-[90vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="h-9 w-9 rounded-xl bg-[#e9f9ee] border border-[#b8edc7] text-[#00a61c] flex items-center justify-center shrink-0">
+                  <Wrench className="h-4 w-4 stroke-[2.5]" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900 leading-tight">
+                    Hardware & Printer Diagnostics
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Live System Spooler Connection • {selectedMachineCode}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowHardwareModal(false)}
+                className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Modal Scrollable Content */}
+            <div className="space-y-4 overflow-y-auto flex-1 pr-1">
+              {/* Machine Status Card */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 text-xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-medium">Terminal Machine:</span>
+                  <span className="font-mono font-bold text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200">
+                    {currentMachine?.machineCode || selectedMachineCode}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-medium">Location:</span>
+                  <span className="text-slate-700 font-semibold">{currentMachine?.displayName || 'Kiosk Location'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-medium">Paper Status:</span>
+                  <span className="text-emerald-700 font-bold font-mono">
+                    {currentMachine?.currentSheetsRemaining ?? 450} / {currentMachine?.totalCapacitySheets ?? 500} sheets
+                  </span>
+                </div>
+              </div>
+
+              {/* Detected Physical Printers */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <Printer className="h-3.5 w-3.5 text-[#00a61c]" /> Detected Printers on System:
+                  </label>
+                  <button
+                    type="button"
+                    onClick={loadHardwarePrinters}
+                    className="text-[11px] text-[#00a61c] hover:underline font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <RefreshCw className="h-3 w-3" /> Rescan
+                  </button>
+                </div>
+
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {installedPrintersList.length > 0 ? (
+                    installedPrintersList.map((p) => {
+                      const isSelected = targetPrinterChoice === p.name;
+                      return (
+                        <div
+                          key={p.name}
+                          onClick={() => setTargetPrinterChoice(p.name)}
+                          className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${
+                            isSelected
+                              ? 'bg-[#e9f9ee] border-[#00a61c] shadow-xs'
+                              : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/60'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div
+                              className={`h-4 w-4 rounded-full border flex items-center justify-center transition-all ${
+                                isSelected ? 'border-[#00a61c] bg-[#00a61c]' : 'border-slate-300 bg-white'
+                              }`}
+                            >
+                              {isSelected && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+                            </div>
+                            <div>
+                              <p className={`text-xs font-bold ${isSelected ? 'text-[#00a61c]' : 'text-slate-800'}`}>
+                                {p.name}
+                              </p>
+                              <p className="text-[10px] text-slate-400 font-mono">
+                                Port: {p.port} • Status: {p.status} {p.isDefault ? '• (Default)' : ''}
+                              </p>
+                            </div>
+                          </div>
+                          {isSelected && (
+                            <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-[#00a61c] text-white">
+                              Active
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-xs text-center">
+                      No local printers returned from scan. You can specify the model manually below.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Target Printer Name Input */}
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">Selected Spooler Device Name:</label>
+                <input
+                  type="text"
+                  value={targetPrinterChoice}
+                  onChange={(e) => setTargetPrinterChoice(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-[#00a61c] focus:ring-1 focus:ring-[#00a61c]"
+                  placeholder="e.g. HP LaserJet Professional P1106"
+                />
+              </div>
+
+              {/* Diagnostics Test Feedback */}
+              {testPrintSuccess && (
+                <div
+                  className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 animate-fade-in ${
+                    testPrintSuccess.startsWith('✅')
+                      ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+                      : 'bg-rose-50 border border-rose-200 text-rose-800'
+                  }`}
+                >
+                  <span>{testPrintSuccess}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={handleTriggerTestPrint}
+                disabled={isTestingPrinter}
+                className="flex-1 py-2.5 px-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-800 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isTestingPrinter ? (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin text-[#00a61c]" />
+                    <span>Spooling Test...</span>
+                  </>
+                ) : (
+                  <>
+                    <Printer className="h-3.5 w-3.5 text-[#00a61c]" />
+                    <span>Send Test Page</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSaveActivePrinter}
+                disabled={isSavingPrinter}
+                className="flex-1 py-2.5 px-3 rounded-xl btn-primary-glow text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                {isSavingPrinter ? (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="h-3.5 w-3.5" />
+                    <span>Connect & Save</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

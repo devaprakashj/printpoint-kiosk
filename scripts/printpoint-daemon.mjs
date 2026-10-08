@@ -128,20 +128,11 @@ async function processPrintOrder(order) {
   console.log(`📄 File: ${order.file_name} (${order.calculated_sheets || 1} sheets, ${order.copies || 1} copies)`);
 
   const storagePath = order.file_storage_url;
-  if (!storagePath) {
-    console.error(`❌ No file storage path found for order ${order.id}`);
-    await supabase.from('orders').update({
-      order_status: 'hardware_error',
-      hardware_stage: 'Error: Storage document not found in vault'
-    }).eq('id', order.id);
-    return;
-  }
-
   const targetPrinter = await detectActivePrinter();
 
   // 1. Mark Printing in progress with live hardware stage
   await supabase.from('orders').update({
-    order_status: 'printing_in_progress',
+    order_status: 'printing',
     hardware_stage: `Connecting to hardware printer [${targetPrinter}]...`,
     current_page_printed: 0
   }).eq('id', order.id);
