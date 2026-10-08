@@ -241,10 +241,6 @@ export default function KioskTouchscreenTerminal() {
     return () => clearInterval(timer);
   }, [step, estimatedSecondsRemaining]);
 
-    }
-    return () => clearInterval(timer);
-  }, [step, estimatedSecondsRemaining]);
-
   // Start Real-time Physical Machine Printing & Hardware-Tracked Delivery
   const handleStartPrint = async () => {
     if (!verifiedOrder) return;
