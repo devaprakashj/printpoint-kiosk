@@ -3,7 +3,29 @@ import { supabaseAdmin, isSupabaseConfigured } from './supabase';
 
 // Production Clean Initial Stores (Zero Mock Data)
 export const SEED_ORGANIZATIONS: Organization[] = [];
-export const SEED_MACHINES: Machine[] = [];
+export const SEED_MACHINES: Machine[] = [
+  {
+    id: 'mach-rit-01',
+    organizationId: 'org-rit',
+    organizationName: 'PrintPoint Campus Kiosk',
+    machineCode: 'RIT-ATM-01',
+    displayName: 'Print ATM - Main Campus Hub',
+    locationDescription: 'Near Main Canteen & Library',
+    deploymentType: 'kiosk_atm',
+    status: 'online',
+    paperStatus: 'ok',
+    currentSheetsRemaining: 500,
+    totalCapacitySheets: 500,
+    tonerLevelPercent: 100,
+    internalTempCelsius: 24,
+    isDoorOpen: false,
+    qrCodeToken: 'QR_RIT_ATM_01_SECURE',
+    defaultPrinterModel: 'HP LaserJet Professional P1106',
+    printerSpoolerName: 'HP LaserJet Professional P1106',
+    activePrinterStatus: 'connected',
+    lastHeartbeatAt: new Date().toISOString(),
+  }
+];
 export const SEED_PRICING_RULES: PricingRule[] = [
   {
     id: 'pr-default-global',
