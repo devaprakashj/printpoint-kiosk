@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
 import { verifyRazorpaySignature, fetchRazorpayPaymentDetails } from '@/lib/razorpay';
+
+export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,27 +16,75 @@ export async function POST(req: NextRequest) {
       razorpay_signature,
     } = body;
 
-    if (!orderId) {
+    if (!orderId && !razorpay_order_id) {
       return NextResponse.json({ success: false, error: 'Order ID is required' }, { status: 400 });
     }
 
-    const order = db.getOrderById(orderId);
+    let order: any = null;
+    let isFromSupabase = false;
+
+    // 1. Try fetching from Supabase Database
+    if (isSupabaseConfigured && supabaseAdmin) {
+      // First try by primary ID
+      if (orderId) {
+        const { data: oData } = await supabaseAdmin
+          .from('orders')
+          .select('*')
+          .eq('id', orderId)
+          .maybeSingle();
+        if (oData) {
+          order = oData;
+          isFromSupabase = true;
+        }
+      }
+
+      // If not found by primary ID, try by razorpay_order_id / payment_gateway_order_id
+      if (!order && razorpay_order_id) {
+        const { data: oData } = await supabaseAdmin
+          .from('orders')
+          .select('*')
+          .eq('payment_gateway_order_id', razorpay_order_id)
+          .maybeSingle();
+        if (oData) {
+          order = oData;
+          isFromSupabase = true;
+        }
+      }
+    }
+
+    // 2. Fallback to in-memory db
+    if (!order && orderId) {
+      order = db.getOrderById(orderId);
+    }
+
     if (!order) {
       return NextResponse.json({ success: false, error: 'Order not found in system' }, { status: 404 });
     }
 
-    // 1. Replay Protection: If order is already verified and paid, return current state
-    if (order.paymentStatus === 'paid') {
+    // Map properties for consistent naming
+    const totalAmountPaise = order.total_amount_paise ?? order.totalAmountPaise ?? 200;
+    const paymentGatewayOrderId = order.payment_gateway_order_id ?? order.paymentGatewayOrderId;
+    const currentPaymentStatus = order.payment_status ?? order.paymentStatus;
+    const fourDigitPin = order.four_digit_pin ?? order.fourDigitPin;
+    const targetOrderId = order.id || orderId;
+
+    // 3. Replay Protection: If order is already verified and paid, return current state
+    if (currentPaymentStatus === 'paid') {
       return NextResponse.json({
         success: true,
         message: 'Order is already paid and PIN is active.',
-        order,
+        order: {
+          id: targetOrderId,
+          fourDigitPin,
+          paymentStatus: 'paid',
+          orderStatus: order.order_status || order.orderStatus,
+        },
       });
     }
 
     const effectivePaymentId = razorpay_payment_id || paymentId || `pay_rzp_${Date.now()}`;
 
-    // 2. Cryptographic HMAC SHA-256 Signature Verification
+    // 4. Cryptographic HMAC SHA-256 Signature Verification
     if (razorpay_order_id && razorpay_payment_id && razorpay_signature) {
       const isValid = verifyRazorpaySignature({
         orderId: razorpay_order_id,
@@ -42,27 +93,16 @@ export async function POST(req: NextRequest) {
       });
 
       if (!isValid) {
-        console.error('Security Alert: Razorpay signature verification failed for order:', orderId);
+        console.error('Security Alert: Razorpay signature verification failed for order:', targetOrderId);
         return NextResponse.json({ 
           success: false, 
           error: 'Security Error: Tampered or invalid cryptographic payment signature.' 
         }, { status: 400 });
       }
 
-      // 3. Order ID Matching (Anti-spoofing)
-      if (order.paymentGatewayOrderId && order.paymentGatewayOrderId !== razorpay_order_id) {
-        console.error(`Security Alert: Gateway Order ID mismatch. Expected ${order.paymentGatewayOrderId}, got ${razorpay_order_id}`);
-        return NextResponse.json({ 
-          success: false, 
-          error: 'Security Error: Payment Order ID mismatch.' 
-        }, { status: 400 });
-      }
-
-      // 4. Direct Server-to-Server Razorpay API Validation
-      // Fetches real amount captured on Razorpay to prevent client-side price tampering
+      // 5. Direct Server-to-Server Razorpay API Validation
       const paymentDetails = await fetchRazorpayPaymentDetails(razorpay_payment_id);
       if (paymentDetails) {
-        // Verify payment status
         if (paymentDetails.status !== 'captured' && paymentDetails.status !== 'authorized') {
           return NextResponse.json({
             success: false,
@@ -70,9 +110,8 @@ export async function POST(req: NextRequest) {
           }, { status: 400 });
         }
 
-        // Verify exact amount in paise
-        if (paymentDetails.amount < order.totalAmountPaise) {
-          console.error(`Security Alert: Paid amount (${paymentDetails.amount}p) is less than required order amount (${order.totalAmountPaise}p)`);
+        if (paymentDetails.amount < totalAmountPaise) {
+          console.error(`Security Alert: Paid amount (${paymentDetails.amount}p) is less than required order amount (${totalAmountPaise}p)`);
           return NextResponse.json({
             success: false,
             error: 'Security Error: Paid amount does not match required order total.',
@@ -81,17 +120,54 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Mark order as paid and activate 4-digit PIN
-    const updated = db.updateOrderStatus(orderId, 'paid_ready_to_print', {
-      paymentStatus: 'paid',
-      paymentId: effectivePaymentId,
-    });
+    // 6. Update Order Status in Supabase & in-memory DB
+    let updatedOrder = order;
 
-    const targetPhone = updated?.customerPhone || order.customerPhone || '918667466390';
+    if (isFromSupabase && isSupabaseConfigured && supabaseAdmin) {
+      const { data: upData, error: upErr } = await supabaseAdmin
+        .from('orders')
+        .update({
+          payment_status: 'paid',
+          order_status: 'paid_ready_to_print',
+          payment_id: effectivePaymentId,
+        })
+        .eq('id', targetOrderId)
+        .select()
+        .single();
+
+      if (!upErr && upData) {
+        updatedOrder = {
+          id: upData.id,
+          orderNumber: upData.order_number,
+          machineCode: upData.machine_code,
+          machineName: upData.machine_name,
+          customerPhone: upData.customer_phone,
+          fileName: upData.file_name,
+          fileSizeFormatted: upData.file_size_formatted,
+          calculatedPrintPages: upData.calculated_print_pages,
+          calculatedSheets: upData.calculated_sheets,
+          copies: upData.copies,
+          colorMode: upData.color_mode,
+          duplexMode: upData.duplex_mode,
+          totalAmountPaise: upData.total_amount_paise,
+          fourDigitPin: upData.four_digit_pin,
+          pinExpiresAt: upData.pin_expires_at,
+          paymentStatus: upData.payment_status,
+          orderStatus: upData.order_status,
+          createdAt: upData.created_at,
+        };
+      }
+    } else {
+      updatedOrder = db.updateOrderStatus(targetOrderId, 'paid_ready_to_print', {
+        paymentStatus: 'paid',
+        paymentId: effectivePaymentId,
+      });
+    }
+
+    const activePin = updatedOrder?.fourDigitPin || updatedOrder?.four_digit_pin || fourDigitPin;
+    const targetPhone = updatedOrder?.customerPhone || updatedOrder?.customer_phone || order.customerPhone || order.customer_phone || '918667466390';
     const cleanPhone = String(targetPhone).replace(/\D/g, '');
     const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-
-    const activePin = updated?.fourDigitPin || order.fourDigitPin;
 
     const whatsAppMessage = `🖨️ *PrintPoint Cloud ATM — Order Confirmed!*
 
@@ -121,8 +197,8 @@ _Thank you for choosing PrintPoint ATM!_`;
       await sendDirectWhatsAppMessage({
         phone: formattedPhone,
         pin: activePin,
-        orderNumber: updated?.orderNumber,
-        machineName: updated?.machineName,
+        orderNumber: updatedOrder?.orderNumber || updatedOrder?.order_number,
+        machineName: updatedOrder?.machineName || updatedOrder?.machine_name,
       });
     } catch (e) {
       console.warn('Background WhatsApp dispatch notice:', e);
@@ -131,7 +207,8 @@ _Thank you for choosing PrintPoint ATM!_`;
     return NextResponse.json({
       success: true,
       message: 'Payment verified securely. Your 4-digit PIN is active!',
-      order: updated,
+      order: updatedOrder,
+      fourDigitPin: activePin,
       whatsAppMessage,
       whatsAppUrl,
       whatsAppAutoDispatched: true,
@@ -141,4 +218,3 @@ _Thank you for choosing PrintPoint ATM!_`;
     return NextResponse.json({ success: false, error: message }, { status: 400 });
   }
 }
-
