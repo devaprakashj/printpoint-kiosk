@@ -560,12 +560,12 @@ export default function KioskTouchscreenTerminal() {
           {(() => {
             const isFresh = Boolean(
               currentMachine?.lastHeartbeatAt &&
-              Date.now() - new Date(currentMachine.lastHeartbeatAt).getTime() < 45000
+              Date.now() - new Date(currentMachine.lastHeartbeatAt).getTime() < 30000
             );
-            const isConnected = isFresh || currentMachine?.activePrinterStatus === 'connected';
-            const printerName = currentMachine?.printerSpoolerName || currentMachine?.defaultPrinterModel || 'HP LaserJet P1106';
+            const isConnected = isFresh && currentMachine?.activePrinterStatus === 'connected';
+            const printerName = currentMachine?.printerSpoolerName || currentMachine?.defaultPrinterModel;
 
-            return isConnected ? (
+            return isConnected && printerName ? (
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold shadow-2xs">
                 <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -652,13 +652,13 @@ export default function KioskTouchscreenTerminal() {
             {(() => {
               const isFresh = Boolean(
                 currentMachine?.lastHeartbeatAt &&
-                Date.now() - new Date(currentMachine.lastHeartbeatAt).getTime() < 45000
+                Date.now() - new Date(currentMachine.lastHeartbeatAt).getTime() < 30000
               );
-              const isConnected = isFresh || currentMachine?.activePrinterStatus === 'connected';
-              const printerName = currentMachine?.printerSpoolerName || currentMachine?.defaultPrinterModel || 'HP LaserJet P1106';
+              const isConnected = isFresh && currentMachine?.activePrinterStatus === 'connected';
+              const printerName = currentMachine?.printerSpoolerName || currentMachine?.defaultPrinterModel;
 
-              return isConnected ? (
-                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-emerald-50/80 border border-emerald-200 text-emerald-800 text-xs font-medium shadow-2xs">
+              return isConnected && printerName ? (
+                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-emerald-50/80 border border-emerald-200 text-emerald-800 text-xs font-medium shadow-2xs animate-fade-in">
                   <span className="relative flex h-2 w-2">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
@@ -667,9 +667,9 @@ export default function KioskTouchscreenTerminal() {
                   <span>Hardware Ready: <strong className="font-bold text-emerald-900">{printerName}</strong></span>
                 </div>
               ) : (
-                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-amber-50/80 border border-amber-200 text-amber-800 text-xs font-medium">
+                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-amber-50/90 border border-amber-200 text-amber-800 text-xs font-medium shadow-2xs animate-fade-in">
                   <AlertCircle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
-                  <span>Printer Daemon Offline • Connect USB & Start Daemon</span>
+                  <span>Printer Disconnected • Start Daemon / Connect USB in Settings</span>
                 </div>
               );
             })()}
