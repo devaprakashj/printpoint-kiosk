@@ -38,6 +38,31 @@ if (!fs.existsSync(tempPrintDir)) {
 }
 
 /**
+ * Detect connected physical printer name on Windows / Linux
+ */
+async function detectActivePrinter() {
+  if (process.platform === 'win32') {
+    try {
+      // Get Default Printer or any physical USB/LaserJet printer
+      const psScript = `powershell -Command "$printers = Get-Printer | Where-Object { $_.PortName -notlike 'PORTPROMPT*' -and $_.Name -notlike 'OneNote*' -and $_.Name -notlike '*PDF*' -and $_.Name -notlike '*Fax*' -and $_.Name -notlike '*XPS*' }; if ($printers) { $printers[0].Name } else { (Get-CimInstance Win32_Printer | Where-Object Default -eq $true).Name }"`;
+      const { stdout } = await execPromise(psScript);
+      const name = stdout.trim();
+      return name || 'HP LaserJet Professional P1106';
+    } catch (e) {
+      return 'HP LaserJet Professional P1106';
+    }
+  } else {
+    try {
+      const { stdout } = await execPromise(`lpstat -d | awk -F': ' '{print $2}'`);
+      const name = stdout.trim();
+      return name || 'HP_LaserJet_Professional_P1106';
+    } catch (e) {
+      return 'HP_LaserJet_Professional_P1106';
+    }
+  }
+}
+
+/**
  * Execute silent printing on physical hardware
  */
 async function printDocumentPhysically(filePath, copies = 1, duplex = false) {
@@ -46,7 +71,7 @@ async function printDocumentPhysically(filePath, copies = 1, duplex = false) {
   if (process.platform === 'win32') {
     // Windows Native Print Command (Powershell Spooler)
     try {
-      const psCommand = `powershell -Command "Start-Process -FilePath '${filePath}' -Verb Print -PassThru | ForEach-Object { Start-Sleep -Seconds 3; if (!$_.HasExited) { Stop-Process -Id $_.Id } }"`;
+      const psCommand = `powershell -Command "Start-Process -FilePath '${filePath}' -Verb Print -PassThru | ForEach-Object { Start-Sleep -Seconds 4; if (!$_.HasExited) { Stop-Process -Id $_.Id } }"`;
       await execPromise(psCommand);
       console.log(`✅ Windows spooler accepted job successfully!`);
       return true;
@@ -144,24 +169,46 @@ async function processPrintOrder(order) {
 async function startDaemon() {
   console.log(`📡 Connecting to Supabase Realtime for machine [${MACHINE_CODE}]...`);
 
-  // Periodic Telemetry Heartbeat (every 30 seconds)
+  const activePrinterName = await detectActivePrinter();
+  console.log(`🖨️ Detected Active Physical Printer: [${activePrinterName}]`);
+
+  // Initial Sync
+  try {
+    await supabase
+      .from('machines')
+      .update({
+        last_heartbeat_at: new Date().toISOString(),
+        status: 'online',
+        active_printer_status: 'connected',
+        printer_spooler_name: activePrinterName,
+        default_printer_model: activePrinterName,
+      })
+      .eq('machine_code', MACHINE_CODE);
+    console.log(`✅ Machine status & printer info synced to Cloud Cluster!`);
+  } catch (e) {
+    console.log(`⚠️ Initial sync warning: ${e.message}`);
+  }
+
+  // Periodic Telemetry Heartbeat (every 10 seconds)
   setInterval(async () => {
     try {
+      const currentPrinter = await detectActivePrinter();
       await supabase
         .from('machines')
         .update({
           last_heartbeat_at: new Date().toISOString(),
           status: 'online',
           active_printer_status: 'connected',
+          printer_spooler_name: currentPrinter,
+          default_printer_model: currentPrinter,
         })
         .eq('machine_code', MACHINE_CODE);
-      console.log(`💓 Heartbeat transmitted to Cloud Cluster: OK`);
     } catch (e) {
       console.log(`⚠️ Heartbeat failed: ${e.message}`);
     }
-  }, 30000);
+  }, 10000);
 
-  // Poll for PIN-released orders every 2.5 seconds
+  // Poll for PIN-released orders every 2.0 seconds
   setInterval(async () => {
     try {
       const { data: orders, error } = await supabase
@@ -179,7 +226,7 @@ async function startDaemon() {
     } catch (e) {
       // ignore
     }
-  }, 2500);
+  }, 2000);
 
   console.log(`✅ Hardware Daemon Ready & Listening for print jobs 24/7!`);
 }

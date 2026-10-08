@@ -105,6 +105,9 @@ export default function KioskTouchscreenTerminal() {
 
   useEffect(() => {
     loadKiosks();
+    // Live auto-polling every 3.5 seconds for real-time printer connection & telemetry
+    const interval = setInterval(loadKiosks, 3500);
+    return () => clearInterval(interval);
   }, [selectedMachineCode]);
 
   // Real-time Clock
@@ -478,6 +481,35 @@ export default function KioskTouchscreenTerminal() {
 
         {/* Right Status & Tools */}
         <div className="flex items-center gap-2 sm:gap-3 text-xs">
+          {/* Live Printer Connection Status Badge */}
+          {(() => {
+            const isFresh = Boolean(
+              currentMachine?.lastHeartbeatAt &&
+              Date.now() - new Date(currentMachine.lastHeartbeatAt).getTime() < 45000
+            );
+            const isConnected = isFresh || currentMachine?.activePrinterStatus === 'connected';
+            const printerName = currentMachine?.printerSpoolerName || currentMachine?.defaultPrinterModel || 'HP LaserJet P1106';
+
+            return isConnected ? (
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold shadow-2xs">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <Printer className="h-3.5 w-3.5 text-emerald-600" />
+                <span className="hidden md:inline">Printer:</span>
+                <span className="font-bold text-emerald-900 max-w-[160px] truncate" title={printerName}>{printerName}</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 font-semibold shadow-2xs">
+                <span className="h-2 w-2 rounded-full bg-amber-500" />
+                <Printer className="h-3.5 w-3.5 text-amber-600" />
+                <span className="hidden sm:inline">Printer:</span>
+                <span className="font-bold text-amber-900">Offline</span>
+              </div>
+            );
+          })()}
+
           {/* Paper Tray Health Badge */}
           <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 border border-slate-200 text-slate-700 font-medium">
             <Layers className="h-3.5 w-3.5 text-[#00a61c]" />
@@ -525,6 +557,32 @@ export default function KioskTouchscreenTerminal() {
                 Type the 4-digit code from your payment receipt to print your documents instantly.
               </p>
             </div>
+
+            {/* Hardware Status Pill Banner */}
+            {(() => {
+              const isFresh = Boolean(
+                currentMachine?.lastHeartbeatAt &&
+                Date.now() - new Date(currentMachine.lastHeartbeatAt).getTime() < 45000
+              );
+              const isConnected = isFresh || currentMachine?.activePrinterStatus === 'connected';
+              const printerName = currentMachine?.printerSpoolerName || currentMachine?.defaultPrinterModel || 'HP LaserJet P1106';
+
+              return isConnected ? (
+                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-emerald-50/80 border border-emerald-200 text-emerald-800 text-xs font-medium shadow-2xs">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  <Printer className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                  <span>Hardware Ready: <strong className="font-bold text-emerald-900">{printerName}</strong></span>
+                </div>
+              ) : (
+                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-amber-50/80 border border-amber-200 text-amber-800 text-xs font-medium">
+                  <AlertCircle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                  <span>Printer Daemon Offline • Connect USB & Start Daemon</span>
+                </div>
+              );
+            })()}
 
             {/* Glowing PIN Display Boxes */}
             <div className="flex items-center justify-center gap-3 sm:gap-4 my-1">
