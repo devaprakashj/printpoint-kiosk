@@ -57,7 +57,7 @@ export default function KioskTouchscreenTerminal() {
   // Hardware Setup & Diagnostics Modal
   const [showHardwareModal, setShowHardwareModal] = useState<boolean>(false);
   const [installedPrintersList, setInstalledPrintersList] = useState<{ name: string; port: string; status: string; isDefault?: boolean }[]>([]);
-  const [targetPrinterChoice, setTargetPrinterChoice] = useState<string>('HP LaserJet Professional P1106');
+  const [targetPrinterChoice, setTargetPrinterChoice] = useState<string>('');
   const [isTestingPrinter, setIsTestingPrinter] = useState<boolean>(false);
   const [testPrintSuccess, setTestPrintSuccess] = useState<string>('');
   const [isSavingPrinter, setIsSavingPrinter] = useState<boolean>(false);
@@ -147,7 +147,11 @@ export default function KioskTouchscreenTerminal() {
       const data = await res.json();
       if (data.success) {
         if (data.installedPrinters) setInstalledPrintersList(data.installedPrinters);
-        if (data.activePrinter) setTargetPrinterChoice(data.activePrinter);
+        if (data.activePrinter) {
+          setTargetPrinterChoice(data.activePrinter);
+        } else if (data.installedPrinters && data.installedPrinters.length > 0) {
+          setTargetPrinterChoice(data.installedPrinters[0].name);
+        }
       }
     } catch (e) {
       console.warn('Hardware scan error:', e);

@@ -53,21 +53,21 @@ async function detectActivePrinter() {
 
   if (process.platform === 'win32') {
     try {
-      // Get Default Printer or any physical USB/LaserJet printer
+      // Find real physical printers excluding virtual/PDF printers
       const psScript = `powershell -Command "$printers = Get-Printer | Where-Object { $_.PortName -notlike 'PORTPROMPT*' -and $_.Name -notlike 'OneNote*' -and $_.Name -notlike '*PDF*' -and $_.Name -notlike '*Fax*' -and $_.Name -notlike '*XPS*' }; if ($printers) { $printers[0].Name } else { (Get-CimInstance Win32_Printer | Where-Object Default -eq $true).Name }"`;
       const { stdout } = await execPromise(psScript);
       const name = stdout.trim();
-      return name || 'HP LaserJet Professional P1106';
+      return name || '';
     } catch (e) {
-      return 'HP LaserJet Professional P1106';
+      return '';
     }
   } else {
     try {
       const { stdout } = await execPromise(`lpstat -d | awk -F': ' '{print $2}'`);
       const name = stdout.trim();
-      return name || 'HP_LaserJet_Professional_P1106';
+      return name || '';
     } catch (e) {
-      return 'HP_LaserJet_Professional_P1106';
+      return '';
     }
   }
 }
@@ -261,12 +261,12 @@ async function startDaemon() {
       .update({
         last_heartbeat_at: new Date().toISOString(),
         status: 'online',
-        active_printer_status: 'connected',
-        printer_spooler_name: activePrinterName,
-        default_printer_model: activePrinterName,
+        active_printer_status: activePrinterName ? 'connected' : 'offline',
+        printer_spooler_name: activePrinterName || null,
+        default_printer_model: activePrinterName || null,
       })
       .eq('machine_code', MACHINE_CODE);
-    console.log(`✅ Machine status & printer info synced to Cloud Cluster!`);
+    console.log(`✅ Machine status & printer info synced to Cloud Cluster! (Printer: ${activePrinterName || 'None'})`);
   } catch (e) {
     console.log(`⚠️ Initial sync warning: ${e.message}`);
   }
@@ -280,9 +280,9 @@ async function startDaemon() {
         .update({
           last_heartbeat_at: new Date().toISOString(),
           status: 'online',
-          active_printer_status: 'connected',
-          printer_spooler_name: currentPrinter,
-          default_printer_model: currentPrinter,
+          active_printer_status: currentPrinter ? 'connected' : 'offline',
+          printer_spooler_name: currentPrinter || null,
+          default_printer_model: currentPrinter || null,
         })
         .eq('machine_code', MACHINE_CODE);
     } catch (e) {

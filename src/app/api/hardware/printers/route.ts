@@ -42,11 +42,7 @@ export async function GET(req: NextRequest) {
           });
         }
       } catch (e) {
-        // Fallback default list
-        installedPrinters = [
-          { name: 'HP LaserJet Professional P1106', port: 'USB001', status: 'Normal', isDefault: true },
-          { name: 'HP LaserJet Pro MFP M126nw', port: 'WSD', status: 'Normal', isDefault: false },
-        ];
+        installedPrinters = [];
       }
     } else {
       // Linux / CUPS
@@ -57,17 +53,15 @@ export async function GET(req: NextRequest) {
           .filter(l => l.startsWith('printer'))
           .map(l => {
             const name = l.split(' ')[1];
-            return { name, port: 'CUPS', status: 'Normal', isDefault: false };
+            return { name, port: 'CUPS', status: 'Ready', isDefault: false };
           });
       } catch (e) {
-        installedPrinters = [
-          { name: 'HP_LaserJet_Professional_P1106', port: 'CUPS', status: 'Normal', isDefault: true }
-        ];
+        installedPrinters = [];
       }
     }
 
     // Get current configured printer from Supabase
-    let activePrinter = 'HP LaserJet Professional P1106';
+    let activePrinter = '';
     if (isSupabaseConfigured && supabaseAdmin) {
       const { data: mach } = await supabaseAdmin
         .from('machines')
@@ -76,8 +70,13 @@ export async function GET(req: NextRequest) {
         .maybeSingle();
 
       if (mach && (mach.printer_spooler_name || mach.default_printer_model)) {
-        activePrinter = mach.printer_spooler_name || mach.default_printer_model;
+        activePrinter = mach.printer_spooler_name || mach.default_printer_model || '';
       }
+    }
+
+    if (!activePrinter && installedPrinters.length > 0) {
+      const physical = installedPrinters.find(p => !p.name.toLowerCase().includes('pdf') && !p.name.toLowerCase().includes('onenote') && !p.name.toLowerCase().includes('xps') && !p.name.toLowerCase().includes('fax'));
+      activePrinter = (physical || installedPrinters[0]).name;
     }
 
     return NextResponse.json({
