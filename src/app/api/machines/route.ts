@@ -15,6 +15,7 @@ export async function GET() {
         .order('created_at', { ascending: false });
 
       if (!error && data && data.length > 0) {
+        const machines = data.map((m: any) => {
           const isHeartbeatFresh = Boolean(
             m.last_heartbeat_at &&
             (Date.now() - new Date(m.last_heartbeat_at).getTime() < 30000)
