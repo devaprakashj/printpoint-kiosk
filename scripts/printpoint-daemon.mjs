@@ -307,7 +307,7 @@ async function startDaemon() {
         .select('*')
         .eq('machine_code', MACHINE_CODE)
         .eq('payment_status', 'paid')
-        .in('order_status', ['paid_ready_to_print', 'release_triggered'])
+        .in('order_status', ['paid_ready_to_print', 'printing', 'release_triggered'])
         .not('pin_used_at', 'is', null)
         .limit(1);
 
