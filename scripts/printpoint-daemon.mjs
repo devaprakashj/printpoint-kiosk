@@ -80,51 +80,15 @@ async function printDocumentPhysically(filePath, copies = 1, duplex = false) {
   console.log(`🖨️  Dispatching physical print job to [${targetPrinter}]: ${filePath} (${copies} copies, duplex: ${duplex})`);
 
   if (process.platform === 'win32') {
-    const ext = path.extname(filePath).toLowerCase();
-    const edgePath = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
-
-    // 1. Text or raw files -> Out-Printer
-    if (ext === '.txt') {
-      try {
-        const psCommand = `powershell -Command "Get-Content -Path '${filePath}' -Raw | Out-Printer -Name '${targetPrinter}'"`;
-        await execPromise(psCommand);
-        console.log(`✅ Windows Out-Printer sent job to [${targetPrinter}] successfully!`);
-        return true;
-      } catch (e) {
-        console.log(`⚠️ Out-Printer fallback:`, e.message);
-      }
-    }
-
-    // 2. PDF / Images / Documents -> Microsoft Edge Headless Silent Print
-    if (fs.existsSync(edgePath)) {
-      try {
-        for (let c = 0; c < copies; c++) {
-          const edgeCmd = `& "${edgePath}" --headless --print-to-printer --printer-name="${targetPrinter}" "${filePath}"`;
-          await execPromise(`powershell -Command "${edgeCmd}"`);
-        }
-        console.log(`✅ Edge Headless Spooler sent ${copies} copy(ies) to [${targetPrinter}] successfully!`);
-        return true;
-      } catch (e) {
-        console.log(`⚠️ Edge silent print notice:`, e.message);
-      }
-    }
-
-    // 3. Fallback: Native Windows PrintTo verb
     try {
-      const psCommand = `powershell -Command "Start-Process -FilePath '${filePath}' -Verb PrintTo -ArgumentList '${targetPrinter}' -PassThru | ForEach-Object { Start-Sleep -Seconds 4; if (!$_.HasExited) { Stop-Process -Id $_.Id } }"`;
+      const psScriptPath = path.join(process.cwd(), 'scripts', 'print-file.ps1');
+      const psCommand = `powershell -ExecutionPolicy Bypass -File "${psScriptPath}" -FilePath "${filePath}" -PrinterName "${targetPrinter}" -Copies ${copies}`;
       await execPromise(psCommand);
       console.log(`✅ Windows spooler sent job to [${targetPrinter}] successfully!`);
       return true;
     } catch (e) {
-      try {
-        const fallbackCmd = `powershell -Command "Start-Process -FilePath '${filePath}' -Verb Print -PassThru | ForEach-Object { Start-Sleep -Seconds 4; if (!$_.HasExited) { Stop-Process -Id $_.Id } }"`;
-        await execPromise(fallbackCmd);
-        console.log(`✅ Windows default spooler executed!`);
-        return true;
-      } catch (err) {
-        console.log(`⚠️ Spooler dispatch warning:`, err.message);
-        return true;
-      }
+      console.log(`⚠️ Spooler dispatch notice:`, e.message);
+      return true;
     }
   } else {
     // Linux / CUPS / Raspberry Pi
