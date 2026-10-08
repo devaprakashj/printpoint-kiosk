@@ -28,13 +28,12 @@ export async function POST(req: NextRequest) {
           await shredDocumentFromR2(oData.file_storage_url).catch(() => {});
         }
 
-        // Set PIN as used and trigger hardware release without prematurely shredding file
+        // Set PIN as used and trigger hardware release
         await supabaseAdmin
           .from('orders')
           .update({
-            order_status: 'release_triggered',
+            order_status: 'printing',
             pin_used_at: completedAt,
-            hardware_stage: 'PIN verified • Connecting to physical laser spooler...',
           })
           .eq('id', orderId);
 
