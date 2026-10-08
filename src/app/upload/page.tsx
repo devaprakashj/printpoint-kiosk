@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { sounds } from '@/lib/sound';
 import confetti from 'canvas-confetti';
 import { 
@@ -62,6 +63,7 @@ interface UploadedDocument {
 }
 
 export default function QwikprintAuthenticApp() {
+  const router = useRouter();
   // Machine Selection
   const [machines, setMachines] = useState<Machine[]>([]);
   const [selectedMachineCode, setSelectedMachineCode] = useState<string>('RIT-ATM-01');
@@ -1265,165 +1267,35 @@ export default function QwikprintAuthenticApp() {
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
 
-      // Securely upload physical document files to Supabase Storage Bucket ('printpoint-documents')
-      filesList.forEach(async (f) => {
-        if (f.file) {
-          try {
-            const formData = new FormData();
-            formData.append('file', f.file);
-            formData.append('orderId', data.order.id);
-            formData.append('fileName', f.name);
-            await fetch('/api/documents/upload', {
-              method: 'POST',
-              body: formData,
-            });
-          } catch (e) {
-            console.warn('Document storage upload notice:', e);
-          }
-        }
-      });
-
-      // Ensure Razorpay SDK is available
-      await ensureRazorpayLoaded();
-
-      if (typeof window !== 'undefined' && (window as any).Razorpay && data.razorpayOrderId) {
-        const options = {
-          key: data.razorpayKeyId || 'rzp_test_TkshNTlCnY93w2',
-          amount: data.order.totalAmountPaise,
-          currency: 'INR',
-          name: 'PrintIt - Contactless Print ATM',
-          description: `Order #${data.order.orderNumber} • ${filesList.length} Document(s)`,
-          image: '/printit-logo.png',
-          order_id: data.razorpayOrderId,
-          prefill: {
-            contact: customerPhone || phoneInput || '8667466390',
-          },
-          theme: {
-            color: '#00a61c',
-          },
-          handler: async function (response: any) {
+      // Securely upload physical document files to Supabase Storage Bucket ('printpoint-documents') in parallel
+      await Promise.all(
+        filesList.map(async (f) => {
+          if (f.file) {
             try {
-              setIsProcessingPay(true);
-              const payRes = await fetch('/api/payments/verify', {
+              const formData = new FormData();
+              formData.append('file', f.file);
+              formData.append('orderId', data.order.id);
+              formData.append('fileName', f.name);
+              await fetch('/api/documents/upload', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  orderId: data.order.id,
-                  razorpay_payment_id: response.razorpay_payment_id,
-                  razorpay_order_id: response.razorpay_order_id,
-                  razorpay_signature: response.razorpay_signature,
-                }),
+                body: formData,
               });
-              const payData = await payRes.json();
-              if (payData.success) {
-                setActiveOrder(payData.order);
-                setPaymentFailure(null);
-                setCurrentStep('pin_success');
-                sounds.success();
-
-                // Automatic direct WhatsApp launch upon payment success
-                if (payData.whatsAppUrl && typeof window !== 'undefined') {
-                  setTimeout(() => {
-                    try {
-                      window.open(payData.whatsAppUrl, '_blank');
-                    } catch (e) {}
-                  }, 800);
-                }
-              } else {
-                sounds.error();
-                setPaymentFailure({
-                  show: true,
-                  title: 'Payment Verification Incomplete',
-                  reason: payData.error || 'The bank response could not be verified in time. If any amount was deducted, it will be automatically refunded by your bank.',
-                  orderId: data.order.id,
-                  isDismissed: false,
-                });
-              }
-            } catch (err) {
-              console.error(err);
-              sounds.error();
-              setPaymentFailure({
-                show: true,
-                title: 'Network Timeout During Verification',
-                reason: 'Could not connect to the verification server. Please retry in a moment.',
-                orderId: data.order.id,
-                isDismissed: false,
-              });
-            } finally {
-              setIsProcessingPay(false);
+            } catch (e) {
+              console.warn('Document storage upload notice:', e);
             }
-          },
-          modal: {
-            ondismiss: function () {
-              setIsProcessingPay(false);
-              sounds.keyPress();
-              setPaymentFailure({
-                show: true,
-                title: 'Payment Window Closed',
-                reason: 'You exited the payment gateway before completing authorization. Your selected files and print preferences have been safely preserved.',
-                orderId: data.order.id,
-                isDismissed: true,
-              });
-            },
-          },
-        };
-
-        const rzp = new (window as any).Razorpay(options);
-        rzp.on('payment.failed', function (resp: any) {
-          console.error('Payment failed:', resp.error);
-          sounds.error();
-          setIsProcessingPay(false);
-          const reasonText = resp.error?.description || resp.error?.reason || 'Transaction was declined by your bank or UPI provider. No amount was deducted.';
-          setPaymentFailure({
-            show: true,
-            title: resp.error?.code === 'BAD_REQUEST_ERROR' ? 'Bank Authorization Declined' : 'Payment Failed',
-            reason: reasonText,
-            orderId: data.order.id,
-            isDismissed: false,
-          });
-        });
-        rzp.open();
-      } else {
-        // Fallback verification
-        const payRes = await fetch('/api/payments/verify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            orderId: data.order.id,
-            paymentId: `pay_rzp_${Date.now()}`,
-          }),
-        });
-        const payData = await payRes.json();
-        if (payData.success) {
-          setActiveOrder(payData.order);
-          setPaymentFailure(null);
-          setCurrentStep('pin_success');
-          sounds.success();
-
-          if (payData.whatsAppUrl && typeof window !== 'undefined') {
-            setTimeout(() => {
-              try {
-                window.open(payData.whatsAppUrl, '_blank');
-              } catch (e) {}
-            }, 800);
           }
-        } else {
-          sounds.error();
-          setPaymentFailure({
-            show: true,
-            title: 'Payment Verification Error',
-            reason: payData.error || 'Verification failed. Please retry.',
-            orderId: data.order.id,
-          });
-        }
-      }
+        })
+      );
+
+      // Immediately route to assigned Order Print Summary page matching Qwikprint flow
+      router.push(`/print-summary/${data.order.id}`);
     } catch (err: any) {
-      console.error('Payment initialization error:', err);
+      console.error(err);
       sounds.error();
       setPaymentFailure({
         show: true,
-        title: 'Payment Service Timeout',
-        reason: err?.message || 'Unable to connect to payment gateway. Please check your internet connection and try again.',
+        title: 'Order Initialization Error',
+        reason: err.message || 'Failed to create order in system. Please retry.',
       });
     } finally {
       setIsProcessingPay(false);
