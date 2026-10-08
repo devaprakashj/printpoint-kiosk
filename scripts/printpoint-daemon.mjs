@@ -299,7 +299,7 @@ async function startDaemon() {
     }
   }, 10000);
 
-  // Poll for PIN-released orders every 2.0 seconds
+  // Poll for PIN-released orders every 1.5 seconds
   setInterval(async () => {
     try {
       const { data: orders, error } = await supabase
@@ -307,7 +307,7 @@ async function startDaemon() {
         .select('*')
         .eq('machine_code', MACHINE_CODE)
         .eq('payment_status', 'paid')
-        .eq('order_status', 'paid_ready_to_print')
+        .in('order_status', ['paid_ready_to_print', 'release_triggered'])
         .not('pin_used_at', 'is', null)
         .limit(1);
 
@@ -317,7 +317,7 @@ async function startDaemon() {
     } catch (e) {
       // ignore
     }
-  }, 2000);
+  }, 1500);
 
   console.log(`✅ Hardware Daemon Ready & Listening for print jobs 24/7!`);
 }

@@ -28,17 +28,13 @@ export async function POST(req: NextRequest) {
           await shredDocumentFromR2(oData.file_storage_url).catch(() => {});
         }
 
-        // Mark order completed in Supabase
+        // Set PIN as used and trigger hardware release without prematurely shredding file
         await supabaseAdmin
           .from('orders')
           .update({
-            order_status: 'completed',
-            completed_at: completedAt,
+            order_status: 'release_triggered',
             pin_used_at: completedAt,
-            file_shredded: true,
-            shredded_at: completedAt,
-            shred_method: 'DoD 5220.22-M Cryptographic Zero-Wipe (0 bytes retained)',
-            file_storage_url: null,
+            hardware_stage: 'PIN verified • Connecting to physical laser spooler...',
           })
           .eq('id', orderId);
 
