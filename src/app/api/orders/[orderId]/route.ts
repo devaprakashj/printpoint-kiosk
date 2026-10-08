@@ -51,6 +51,8 @@ export async function GET(
           pinExpiresAt: data.pin_expires_at,
           paymentStatus: data.payment_status,
           orderStatus: data.order_status,
+          hardwareStage: data.hardware_stage || '',
+          currentPagePrinted: data.current_page_printed || 0,
           paymentGatewayOrderId: data.payment_gateway_order_id,
           createdAt: data.created_at,
           completedAt: data.completed_at,

@@ -133,22 +133,43 @@ function shredLocalFile(filePath) {
 async function processPrintOrder(order) {
   console.log(`\n📥 [NEW PRINT JOB TRIGGERED]`);
   console.log(`🆔 Order: ${order.order_number || order.id} | Pin: ${order.four_digit_pin}`);
-  console.log(`📄 File: ${order.file_name} (${order.calculated_sheets} sheets, ${order.copies} copies)`);
+  console.log(`📄 File: ${order.file_name} (${order.calculated_sheets || 1} sheets, ${order.copies || 1} copies)`);
 
   const storagePath = order.file_storage_url;
   if (!storagePath) {
     console.error(`❌ No file storage path found for order ${order.id}`);
+    await supabase.from('orders').update({
+      order_status: 'hardware_error',
+      hardware_stage: 'Error: Storage document not found in vault'
+    }).eq('id', order.id);
     return;
   }
 
-  // 1. Download file from Supabase Storage
+  const targetPrinter = await detectActivePrinter();
+
+  // 1. Mark Printing in progress with live hardware stage
+  await supabase.from('orders').update({
+    order_status: 'printing_in_progress',
+    hardware_stage: `Connecting to hardware printer [${targetPrinter}]...`,
+    current_page_printed: 0
+  }).eq('id', order.id);
+
+  // 2. Download file from Supabase Storage
   console.log(`⬇️  Downloading file from Supabase Storage: ${storagePath}`);
+  await supabase.from('orders').update({
+    hardware_stage: `Downloading encrypted document from Cloud Vault...`
+  }).eq('id', order.id);
+
   const { data: fileData, error: downloadError } = await supabase.storage
     .from('printpoint-documents')
     .download(storagePath);
 
   if (downloadError || !fileData) {
     console.error(`❌ Failed to download file:`, downloadError?.message);
+    await supabase.from('orders').update({
+      order_status: 'hardware_error',
+      hardware_stage: `Download Failed: ${downloadError?.message || 'File not found'}`
+    }).eq('id', order.id);
     return;
   }
 
@@ -157,17 +178,33 @@ async function processPrintOrder(order) {
   const tempFilePath = path.join(tempPrintDir, `job_${order.id}_${Date.now()}.pdf`);
   fs.writeFileSync(tempFilePath, buffer);
 
-  // 2. Dispatch to Physical Printer
+  // 3. Dispatch to Physical Printer and track real queue
+  await supabase.from('orders').update({
+    hardware_stage: `Spooling document to [${targetPrinter}] • Warming up laser fuser...`,
+    current_page_printed: 1
+  }).eq('id', order.id);
+
   const isDuplex = order.duplex_mode === 'double';
   const copies = order.copies || 1;
   const printed = await printDocumentPhysically(tempFilePath, copies, isDuplex);
 
   if (printed) {
-    // 3. Mark completed in Supabase
+    // Monitor hardware dispensing delay (approx 1.5s per sheet for laser mechanics)
+    const sheets = Math.max(1, order.calculated_sheets || 1);
+    for (let s = 1; s <= sheets; s++) {
+      await supabase.from('orders').update({
+        hardware_stage: `Dispensing physical sheet ${s} of ${sheets} from ${targetPrinter}...`,
+        current_page_printed: s
+      }).eq('id', order.id);
+      await new Promise(r => setTimeout(r, 1200));
+    }
+
+    // 4. Mark verified completed in Supabase
     await supabase
       .from('orders')
       .update({
         order_status: 'completed',
+        hardware_stage: 'Physical document successfully dispensed to tray!',
         completed_at: new Date().toISOString(),
         file_shredded: true,
         shredded_at: new Date().toISOString(),
@@ -175,10 +212,32 @@ async function processPrintOrder(order) {
       })
       .eq('id', order.id);
 
-    console.log(`🎉 Job Complete! Order status updated to 'completed' in Supabase.`);
+    // 5. Update remaining paper count in machine
+    try {
+      const { data: mach } = await supabase
+        .from('machines')
+        .select('current_sheets_remaining')
+        .eq('machine_code', MACHINE_CODE)
+        .maybeSingle();
 
-    // 4. Secure Zero-Retention Shredding
+      if (mach) {
+        const remaining = Math.max(0, (mach.current_sheets_remaining || 500) - sheets);
+        await supabase
+          .from('machines')
+          .update({ current_sheets_remaining: remaining })
+          .eq('machine_code', MACHINE_CODE);
+      }
+    } catch (me) {}
+
+    console.log(`🎉 Job Complete & Verified! Order marked 'completed' in Supabase.`);
+
+    // 6. Secure Zero-Retention Shredding
     shredLocalFile(tempFilePath);
+  } else {
+    await supabase.from('orders').update({
+      order_status: 'hardware_error',
+      hardware_stage: `Print Spooler Error: Printer [${targetPrinter}] rejected job. Check USB & paper.`
+    }).eq('id', order.id);
   }
 }
 

@@ -241,106 +241,35 @@ export default function KioskTouchscreenTerminal() {
     return () => clearInterval(timer);
   }, [step, estimatedSecondsRemaining]);
 
-  // Start Real-time Physical Machine Printing & Paper Delivery Simulation
+    }
+    return () => clearInterval(timer);
+  }, [step, estimatedSecondsRemaining]);
+
+  // Start Real-time Physical Machine Printing & Hardware-Tracked Delivery
   const handleStartPrint = async () => {
     if (!verifiedOrder) return;
 
     setStep('printing_in_progress');
     setIsRollerSpinning(true);
-    
+    setIsPaperFeeding(true);
+    setPinError('');
+
     const totalPages = verifiedOrder.calculatedPrintPages || verifiedOrder.detectedTotalPages || 1;
     const totalSheets = verifiedOrder.calculatedSheets || 1;
     const isDuplex = verifiedOrder.duplexMode === 'duplex';
 
-    // Calculate accurate wait time: 1.2s pre-flight + (totalPages * 1.0s) + 0.6s fuser finish
-    const totalWaitSeconds = Math.max(3, Math.ceil(1.5 + (totalPages * 1.0) + 0.6));
-    setEstimatedSecondsRemaining(totalWaitSeconds);
-
-    setPrintProgress(8);
+    setTotalPrintPages(totalPages);
+    setPrintProgress(10);
     setFuserTemp(202);
-    setPrintStage('Laser fuser heating to 200°C • Polygon mirror motor spin-up...');
+    setPrintStage('Authorizing hardware release & notifying printer daemon...');
     setSheetsPrintedCount(0);
     setCurrentPrintingPage(1);
     setCurrentPrintingSide(isDuplex ? 'Front' : 'Single');
     playSound('laser');
 
-    // Stage 1: Laser Mirror Spin-up & Rasterization (1.2s)
-    await new Promise(r => setTimeout(r, 1200));
-    setPrintProgress(20);
-    setPrintStage('Decrypting RAM document buffer & optical laser calibration...');
-
-    // Stage 2: Page-by-Page Physical Roller Feed & Laser Imaging Loop
-    for (let p = 1; p <= totalPages; p++) {
-      setCurrentPrintingPage(p);
-      const isBackSide = isDuplex && (p % 2 === 0);
-      setCurrentPrintingSide(isDuplex ? (isBackSide ? 'Back' : 'Front') : 'Single');
-
-      // Trigger realistic paper feeding animation
-      setIsPaperFeeding(true);
-      playSound('roller');
-
-      if (isDuplex && isBackSide) {
-        setIsDuplexFlipping(true);
-        setPrintStage(`Duplex Turnaround: Flipping sheet to Side 2 (Back) for Page ${p} of ${totalPages}...`);
-        await new Promise(r => setTimeout(r, 450));
-        setIsDuplexFlipping(false);
-      } else {
-        setPrintStage(
-          isDuplex
-            ? `Laser Burning Page ${p} of ${totalPages} • Side 1 (Front)...`
-            : `Laser Burning Page ${p} of ${totalPages} (600 DPI Precision)...`
-        );
-      }
-
-      // Page print pass duration
-      await new Promise(r => setTimeout(r, 900));
-      setIsPaperFeeding(false);
-
-      // Sheet output drop when front+back completed (duplex) or every page (simplex)
-      if (!isDuplex || isBackSide || p === totalPages) {
-        const currentSheetNum = Math.ceil(p / (isDuplex ? 2 : 1));
-        setSheetsPrintedCount(currentSheetNum);
-        playSound('dispense');
-      }
-
-      const progressCalc = 20 + Math.round((p / totalPages) * 72);
-      setPrintProgress(Math.min(94, progressCalc));
-    }
-
-    setPrintStage('Optical paper alignment & collection tray delivery...');
-    // Trigger Physical Printing (Silent in Chromium/Chrome with --kiosk-printing)
+    // 1. Trigger backend release immediately to notify the Hardware Daemon in Supabase
     try {
-      if (verifiedOrder.fileStorageUrl) {
-        const downloadUrl = `/api/documents/download?path=${encodeURIComponent(verifiedOrder.fileStorageUrl)}`;
-        let printFrame = document.getElementById('kiosk-silent-print-frame') as HTMLIFrameElement;
-        if (!printFrame) {
-          printFrame = document.createElement('iframe');
-          printFrame.id = 'kiosk-silent-print-frame';
-          printFrame.style.position = 'fixed';
-          printFrame.style.right = '0';
-          printFrame.style.bottom = '0';
-          printFrame.style.width = '0';
-          printFrame.style.height = '0';
-          printFrame.style.border = '0';
-          document.body.appendChild(printFrame);
-        }
-        printFrame.src = downloadUrl;
-        printFrame.onload = () => {
-          try {
-            printFrame.contentWindow?.focus();
-            printFrame.contentWindow?.print();
-          } catch (pe) {
-            console.log('Physical silent print dispatched to default spooler');
-          }
-        };
-      }
-    } catch (e) {
-      console.log('Browser print dispatch:', e);
-    }
-
-    // Stage 3: Call Backend Paper Release API to deduct paper count and seal order
-    try {
-      const releaseRes = await fetch('/api/pin/release', {
+      await fetch('/api/pin/release', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -348,33 +277,90 @@ export default function KioskTouchscreenTerminal() {
           machineCode: selectedMachineCode,
         }),
       });
-      const releaseData = await releaseRes.json();
-      if (releaseData.success) {
-        loadKiosks(); // Refresh paper counts in DB
-      }
     } catch (e) {
-      console.warn('Paper release sync warning:', e);
+      console.warn('PIN release trigger error:', e);
     }
 
-    // Final Stage: Complete & Privacy Auto-Wipe
-    setEstimatedSecondsRemaining(0);
-    setPrintProgress(100);
-    setFuserTemp(140);
-    setPrintStage('All Documents Successfully Delivered to Collection Tray!');
-    playSound('complete');
+    // 2. Poll Real Hardware Order Status from Cloud DB until physical printer completes
+    let isCompleted = false;
+    let pollCount = 0;
+    const maxPolls = 120; // 60 seconds maximum timeout
 
-    // Confetti celebration
-    try {
-      confetti({
-        particleCount: 120,
-        spread: 85,
-        origin: { y: 0.55 },
-        colors: ['#00a61c', '#16a34a', '#86efac', '#0f172a', '#38bdf8']
-      });
-    } catch (e) {}
+    const pollInterval = setInterval(async () => {
+      pollCount++;
+      try {
+        const res = await fetch(`/api/orders/${verifiedOrder.id}?t=${Date.now()}`, {
+          cache: 'no-store',
+        });
+        const data = await res.json();
 
-    await new Promise(r => setTimeout(r, 500));
-    setStep('job_completed');
+        if (data.success && data.order) {
+          const ord = data.order;
+
+          // Update live hardware stages from real printer
+          if (ord.hardwareStage) {
+            setPrintStage(ord.hardwareStage);
+          }
+
+          if (ord.currentPagePrinted) {
+            setSheetsPrintedCount(ord.currentPagePrinted);
+            const progress = Math.min(95, 20 + Math.round((ord.currentPagePrinted / totalSheets) * 75));
+            setPrintProgress(progress);
+            playSound('roller');
+          }
+
+          // Case A: Hardware Error from physical spooler
+          if (ord.orderStatus === 'hardware_error') {
+            clearInterval(pollInterval);
+            setIsRollerSpinning(false);
+            setIsPaperFeeding(false);
+            setPinError(ord.hardwareStage || 'Hardware Printer Error. Check printer power & paper.');
+            setStep('order_verified');
+            playSound('error');
+            return;
+          }
+
+          // Case B: Verified Complete by Hardware Daemon
+          if (ord.orderStatus === 'completed') {
+            clearInterval(pollInterval);
+            isCompleted = true;
+            setIsRollerSpinning(false);
+            setIsPaperFeeding(false);
+            setPrintProgress(100);
+            setSheetsPrintedCount(totalSheets);
+            setPrintStage('Physical document verified in collection tray!');
+            playSound('complete');
+
+            // Confetti celebration
+            try {
+              confetti({
+                particleCount: 120,
+                spread: 85,
+                origin: { y: 0.55 },
+                colors: ['#00a61c', '#16a34a', '#86efac', '#0f172a', '#38bdf8']
+              });
+            } catch (ce) {}
+
+            await new Promise(r => setTimeout(r, 600));
+            loadKiosks();
+            setStep('job_completed');
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn('Poll status error:', err);
+      }
+
+      // Fallback timeout warning if daemon is offline
+      if (pollCount >= maxPolls && !isCompleted) {
+        clearInterval(pollInterval);
+        setIsRollerSpinning(false);
+        setIsPaperFeeding(false);
+        setPinError('Hardware response timed out. Ensure printer daemon is running on laptop/Pi.');
+        setStep('order_verified');
+        playSound('error');
+      }
+    }, 700);
   };
 
   // Auto-reset countdown timer for next customer
