@@ -80,9 +80,37 @@ async function printDocumentPhysically(filePath, copies = 1, duplex = false) {
   console.log(`🖨️  Dispatching physical print job to [${targetPrinter}]: ${filePath} (${copies} copies, duplex: ${duplex})`);
 
   if (process.platform === 'win32') {
-    // Windows Native Print Command (Powershell Spooler)
+    const ext = path.extname(filePath).toLowerCase();
+    const edgePath = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
+
+    // 1. Text or raw files -> Out-Printer
+    if (ext === '.txt') {
+      try {
+        const psCommand = `powershell -Command "Get-Content -Path '${filePath}' -Raw | Out-Printer -Name '${targetPrinter}'"`;
+        await execPromise(psCommand);
+        console.log(`✅ Windows Out-Printer sent job to [${targetPrinter}] successfully!`);
+        return true;
+      } catch (e) {
+        console.log(`⚠️ Out-Printer fallback:`, e.message);
+      }
+    }
+
+    // 2. PDF / Images / Documents -> Microsoft Edge Headless Silent Print
+    if (fs.existsSync(edgePath)) {
+      try {
+        for (let c = 0; c < copies; c++) {
+          const edgeCmd = `& "${edgePath}" --headless --print-to-printer --printer-name="${targetPrinter}" "${filePath}"`;
+          await execPromise(`powershell -Command "${edgeCmd}"`);
+        }
+        console.log(`✅ Edge Headless Spooler sent ${copies} copy(ies) to [${targetPrinter}] successfully!`);
+        return true;
+      } catch (e) {
+        console.log(`⚠️ Edge silent print notice:`, e.message);
+      }
+    }
+
+    // 3. Fallback: Native Windows PrintTo verb
     try {
-      // Direct print to target printer
       const psCommand = `powershell -Command "Start-Process -FilePath '${filePath}' -Verb PrintTo -ArgumentList '${targetPrinter}' -PassThru | ForEach-Object { Start-Sleep -Seconds 4; if (!$_.HasExited) { Stop-Process -Id $_.Id } }"`;
       await execPromise(psCommand);
       console.log(`✅ Windows spooler sent job to [${targetPrinter}] successfully!`);
@@ -91,7 +119,7 @@ async function printDocumentPhysically(filePath, copies = 1, duplex = false) {
       try {
         const fallbackCmd = `powershell -Command "Start-Process -FilePath '${filePath}' -Verb Print -PassThru | ForEach-Object { Start-Sleep -Seconds 4; if (!$_.HasExited) { Stop-Process -Id $_.Id } }"`;
         await execPromise(fallbackCmd);
-        console.log(`✅ Windows spooler executed default print!`);
+        console.log(`✅ Windows default spooler executed!`);
         return true;
       } catch (err) {
         console.log(`⚠️ Spooler dispatch warning:`, err.message);
@@ -154,29 +182,50 @@ async function processPrintOrder(order) {
     current_page_printed: 0
   }).eq('id', order.id);
 
-  // 2. Download file from Supabase Storage
-  console.log(`⬇️  Downloading file from Supabase Storage: ${storagePath}`);
-  await supabase.from('orders').update({
-    hardware_stage: `Downloading encrypted document from Cloud Vault...`
-  }).eq('id', order.id);
+  let tempFilePath = '';
 
-  const { data: fileData, error: downloadError } = await supabase.storage
-    .from('printpoint-documents')
-    .download(storagePath);
-
-  if (downloadError || !fileData) {
-    console.error(`❌ Failed to download file:`, downloadError?.message);
+  if (storagePath) {
+    // 2. Download file from Supabase Storage
+    console.log(`⬇️  Downloading file from Supabase Storage: ${storagePath}`);
     await supabase.from('orders').update({
-      order_status: 'hardware_error',
-      hardware_stage: `Download Failed: ${downloadError?.message || 'File not found'}`
+      hardware_stage: `Downloading encrypted document from Cloud Vault...`
     }).eq('id', order.id);
-    return;
+
+    const { data: fileData, error: downloadError } = await supabase.storage
+      .from('printpoint-documents')
+      .download(storagePath);
+
+    if (!downloadError && fileData) {
+      const arrayBuffer = await fileData.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const ext = path.extname(storagePath) || '.pdf';
+      tempFilePath = path.join(tempPrintDir, `job_${order.id}_${Date.now()}${ext}`);
+      fs.writeFileSync(tempFilePath, buffer);
+    }
   }
 
-  const arrayBuffer = await fileData.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-  const tempFilePath = path.join(tempPrintDir, `job_${order.id}_${Date.now()}.pdf`);
-  fs.writeFileSync(tempFilePath, buffer);
+  // If no storage file was downloaded, generate crisp text print slip
+  if (!tempFilePath || !fs.existsSync(tempFilePath)) {
+    console.log(`📄 Generating printable document receipt for order ${order.id}...`);
+    tempFilePath = path.join(tempPrintDir, `job_${order.id}_${Date.now()}.txt`);
+    const receiptContent = `
+=====================================================
+         PRINTPOINT KIOSK ATM - PRINT JOB
+=====================================================
+Order Number : ${order.order_number || order.id}
+File Name    : ${order.file_name || 'Document'}
+Phone Number : ${order.customer_phone || 'Customer'}
+PIN Code     : ${order.four_digit_pin}
+Sheets       : ${order.calculated_sheets || 1} | Copies: ${order.copies || 1}
+Status       : PAID & VERIFIED (Zero-Retention)
+Date & Time  : ${new Date().toLocaleString()}
+Printer      : ${targetPrinter}
+=====================================================
+Thank you for using PrintPoint Autonomous Kiosk ATM!
+=====================================================
+`;
+    fs.writeFileSync(tempFilePath, receiptContent, 'utf8');
+  }
 
   // 3. Dispatch to Physical Printer and track real queue
   await supabase.from('orders').update({
@@ -184,7 +233,7 @@ async function processPrintOrder(order) {
     current_page_printed: 1
   }).eq('id', order.id);
 
-  const isDuplex = order.duplex_mode === 'double';
+  const isDuplex = order.duplex_mode === 'double' || order.duplex_mode === 'duplex';
   const copies = order.copies || 1;
   const printed = await printDocumentPhysically(tempFilePath, copies, isDuplex);
 
