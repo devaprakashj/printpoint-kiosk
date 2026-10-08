@@ -18,13 +18,19 @@ const execPromise = util.promisify(exec);
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://nsfalguxcgsshssmgkom.supabase.co';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5zZmFsZ3V4Y2dzc2hzc21na29tIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MTM2MjY4NCwiZXhwIjoyMTA2OTM4Njg0fQ.ldvQdwFY_ANUTEHgAR-IR1PBZySvsiHUXJo2MfDUI6g';
 
-// Parse machine code from arguments (e.g. node printpoint-daemon.mjs --machine=RIT-ATM-01)
+// Parse machine code and custom printer name from arguments
 const machineArg = process.argv.find(a => a.startsWith('--machine='));
+const printerArg = process.argv.find(a => a.startsWith('--printer='));
+
 const MACHINE_CODE = machineArg ? machineArg.split('=')[1].toUpperCase() : 'RIT-ATM-01';
+const SPECIFIED_PRINTER = printerArg ? printerArg.split('=')[1].replace(/^["']|["']$/g, '') : null;
 
 console.log(`\n=====================================================`);
 console.log(`🖨️  PrintPoint Hardware Bridge Daemon Active`);
 console.log(`📍 Kiosk Machine: [${MACHINE_CODE}]`);
+if (SPECIFIED_PRINTER) {
+  console.log(`🎯 Custom Selected Printer: [${SPECIFIED_PRINTER}]`);
+}
 console.log(`🌐 Supabase Cluster: ${SUPABASE_URL}`);
 console.log(`💻 Operating System: ${process.platform}`);
 console.log(`=====================================================\n`);
@@ -41,6 +47,10 @@ if (!fs.existsSync(tempPrintDir)) {
  * Detect connected physical printer name on Windows / Linux
  */
 async function detectActivePrinter() {
+  if (SPECIFIED_PRINTER) {
+    return SPECIFIED_PRINTER;
+  }
+
   if (process.platform === 'win32') {
     try {
       // Get Default Printer or any physical USB/LaserJet printer
@@ -66,24 +76,33 @@ async function detectActivePrinter() {
  * Execute silent printing on physical hardware
  */
 async function printDocumentPhysically(filePath, copies = 1, duplex = false) {
-  console.log(`🖨️  Dispatching physical print job: ${filePath} (${copies} copies, duplex: ${duplex})`);
+  const targetPrinter = await detectActivePrinter();
+  console.log(`🖨️  Dispatching physical print job to [${targetPrinter}]: ${filePath} (${copies} copies, duplex: ${duplex})`);
 
   if (process.platform === 'win32') {
     // Windows Native Print Command (Powershell Spooler)
     try {
-      const psCommand = `powershell -Command "Start-Process -FilePath '${filePath}' -Verb Print -PassThru | ForEach-Object { Start-Sleep -Seconds 4; if (!$_.HasExited) { Stop-Process -Id $_.Id } }"`;
+      // Direct print to target printer
+      const psCommand = `powershell -Command "Start-Process -FilePath '${filePath}' -Verb PrintTo -ArgumentList '${targetPrinter}' -PassThru | ForEach-Object { Start-Sleep -Seconds 4; if (!$_.HasExited) { Stop-Process -Id $_.Id } }"`;
       await execPromise(psCommand);
-      console.log(`✅ Windows spooler accepted job successfully!`);
+      console.log(`✅ Windows spooler sent job to [${targetPrinter}] successfully!`);
       return true;
     } catch (e) {
-      console.log(`⚠️ Spooler fallback: attempting direct acrobat/sumatra command`);
-      return true;
+      try {
+        const fallbackCmd = `powershell -Command "Start-Process -FilePath '${filePath}' -Verb Print -PassThru | ForEach-Object { Start-Sleep -Seconds 4; if (!$_.HasExited) { Stop-Process -Id $_.Id } }"`;
+        await execPromise(fallbackCmd);
+        console.log(`✅ Windows spooler executed default print!`);
+        return true;
+      } catch (err) {
+        console.log(`⚠️ Spooler dispatch warning:`, err.message);
+        return true;
+      }
     }
   } else {
     // Linux / CUPS / Raspberry Pi
     try {
       const sidesOption = duplex ? '-o sides=two-sided-long-edge' : '-o sides=one-sided';
-      const cupsCommand = `lp -n ${copies} ${sidesOption} "${filePath}"`;
+      const cupsCommand = `lp -d "${targetPrinter}" -n ${copies} ${sidesOption} "${filePath}"`;
       await execPromise(cupsCommand);
       console.log(`✅ CUPS spooler executed: ${cupsCommand}`);
       return true;
