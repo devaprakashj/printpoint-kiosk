@@ -91,7 +91,10 @@ export default function KioskTouchscreenTerminal() {
         }
       }
 
-      const res = await fetch('/api/machines');
+      const res = await fetch(`/api/machines?t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' }
+      });
       const data = await res.json();
       if (data.success && data.machines?.length > 0) {
         setMachines(data.machines);
