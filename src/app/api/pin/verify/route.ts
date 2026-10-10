@@ -85,11 +85,29 @@ export async function POST(req: NextRequest) {
           paymentStatus: oData.payment_status,
           orderStatus: oData.order_status,
           machineCode: oData.machine_code,
+          fourDigitPin: oData.four_digit_pin,
         };
       }
-    } else {
-      order = db.getOrderByPin(cleanPin);
-      if (machineCode) {
+    }
+
+    if (!order) {
+      const dbOrder = db.getOrderByPin(cleanPin) || db.findAnyOrderByPin(cleanPin);
+      if (dbOrder) {
+        if (dbOrder.orderStatus === 'completed') {
+          return NextResponse.json(
+            { 
+              success: false, 
+              error: `Security Alert: PIN #${cleanPin} has already been used and fulfilled. Single-use PINs cannot be reused.` 
+            },
+            { status: 400 }
+          );
+        }
+        order = {
+          ...dbOrder,
+          totalAmountRupees: `₹${((dbOrder.totalAmountPaise || 200) / 100).toFixed(2)}`,
+        };
+      }
+      if (machineCode && !machine) {
         machine = db.getMachineByCode(machineCode);
       }
     }

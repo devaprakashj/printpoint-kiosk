@@ -25,13 +25,16 @@ export async function POST(req: NextRequest) {
 
     // 1. Try fetching from Supabase Database
     if (isSupabaseConfigured && supabaseAdmin) {
-      // First try by primary ID
+      // First try by primary ID or Order Number
       if (orderId) {
-        const { data: oData } = await supabaseAdmin
-          .from('orders')
-          .select('*')
-          .eq('id', orderId)
-          .maybeSingle();
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
+        let q = supabaseAdmin.from('orders').select('*');
+        if (isUuid) {
+          q = q.eq('id', orderId);
+        } else {
+          q = q.eq('order_number', orderId);
+        }
+        const { data: oData } = await q.maybeSingle();
         if (oData) {
           order = oData;
           isFromSupabase = true;
@@ -123,45 +126,60 @@ export async function POST(req: NextRequest) {
     // 6. Update Order Status in Supabase & in-memory DB
     let updatedOrder = order;
 
-    if (isFromSupabase && isSupabaseConfigured && supabaseAdmin) {
-      const { data: upData, error: upErr } = await supabaseAdmin
-        .from('orders')
-        .update({
-          payment_status: 'paid',
-          order_status: 'paid_ready_to_print',
-          payment_id: effectivePaymentId,
-        })
-        .eq('id', targetOrderId)
-        .select()
-        .single();
+    if (isSupabaseConfigured && supabaseAdmin) {
+      try {
+        const isTargetUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(targetOrderId));
+        let uQuery = supabaseAdmin
+          .from('orders')
+          .update({
+            payment_status: 'paid',
+            order_status: 'paid_ready_to_print',
+            payment_id: effectivePaymentId,
+          });
 
-      if (!upErr && upData) {
-        updatedOrder = {
-          id: upData.id,
-          orderNumber: upData.order_number,
-          machineCode: upData.machine_code,
-          machineName: upData.machine_name,
-          customerPhone: upData.customer_phone,
-          fileName: upData.file_name,
-          fileSizeFormatted: upData.file_size_formatted,
-          calculatedPrintPages: upData.calculated_print_pages,
-          calculatedSheets: upData.calculated_sheets,
-          copies: upData.copies,
-          colorMode: upData.color_mode,
-          duplexMode: upData.duplex_mode,
-          totalAmountPaise: upData.total_amount_paise,
-          fourDigitPin: upData.four_digit_pin,
-          pinExpiresAt: upData.pin_expires_at,
-          paymentStatus: upData.payment_status,
-          orderStatus: upData.order_status,
-          createdAt: upData.created_at,
-        };
+        if (isTargetUuid) {
+          uQuery = uQuery.eq('id', targetOrderId);
+        } else {
+          uQuery = uQuery.eq('order_number', targetOrderId);
+        }
+
+        const { data: upData, error: upErr } = await uQuery.select().maybeSingle();
+
+        if (!upErr && upData) {
+          updatedOrder = {
+            id: upData.id,
+            orderNumber: upData.order_number,
+            machineCode: upData.machine_code,
+            machineName: upData.machine_name,
+            customerPhone: upData.customer_phone,
+            customerName: upData.customer_name || order.customer_name || order.customerName || 'Student',
+            fileName: upData.file_name,
+            fileSizeFormatted: upData.file_size_formatted,
+            calculatedPrintPages: upData.calculated_print_pages,
+            calculatedSheets: upData.calculated_sheets,
+            copies: upData.copies,
+            colorMode: upData.color_mode,
+            duplexMode: upData.duplex_mode,
+            totalAmountPaise: upData.total_amount_paise,
+            fourDigitPin: upData.four_digit_pin,
+            pinExpiresAt: upData.pin_expires_at,
+            paymentStatus: upData.payment_status,
+            orderStatus: upData.order_status,
+            createdAt: upData.created_at,
+          };
+        }
+      } catch (e) {
+        console.warn('Supabase order update notice:', e);
       }
-    } else {
-      updatedOrder = db.updateOrderStatus(targetOrderId, 'paid_ready_to_print', {
-        paymentStatus: 'paid',
-        paymentId: effectivePaymentId,
-      });
+    }
+
+    // Always keep in-memory DB in sync as well
+    const memOrder = db.updateOrderStatus(targetOrderId, 'paid_ready_to_print', {
+      paymentStatus: 'paid',
+      paymentId: effectivePaymentId,
+    });
+    if (!updatedOrder || updatedOrder.paymentStatus !== 'paid') {
+      updatedOrder = memOrder || { ...order, paymentStatus: 'paid', orderStatus: 'paid_ready_to_print' };
     }
 
     const activePin = updatedOrder?.fourDigitPin || updatedOrder?.four_digit_pin || fourDigitPin;

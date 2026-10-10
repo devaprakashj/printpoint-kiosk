@@ -1,10 +1,11 @@
-// Web Audio API Synthesizer for Touchscreen ATM feedback (No audio files needed)
+// Web Audio API Synthesizer for Touchscreen ATM feedback (Zero external audio files needed)
 
 class SoundFX {
   private ctx: AudioContext | null = null;
+  private isMuted: boolean = false;
 
   private getContext(): AudioContext | null {
-    if (typeof window === 'undefined') return null;
+    if (this.isMuted || typeof window === 'undefined') return null;
     if (!this.ctx) {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (AudioCtx) {
@@ -15,6 +16,10 @@ class SoundFX {
       this.ctx.resume();
     }
     return this.ctx;
+  }
+
+  setMuted(muted: boolean) {
+    this.isMuted = muted;
   }
 
   // Keypad click sound
@@ -32,9 +37,27 @@ class SoundFX {
       gain.connect(ctx.destination);
       osc.start();
       osc.stop(ctx.currentTime + 0.05);
-    } catch {
-      // Ignore audio policy restrictions
-    }
+    } catch {}
+  }
+
+  pinKey() {
+    this.keyPress();
+  }
+
+  orderFound() {
+    this.success();
+  }
+
+  startPrint() {
+    this.laserSpinUp();
+  }
+
+  printing() {
+    this.paperPassRoller();
+  }
+
+  jobCompleted() {
+    this.printComplete();
   }
 
   // Success chime
@@ -55,9 +78,7 @@ class SoundFX {
         osc.start(now + i * 0.08);
         osc.stop(now + i * 0.08 + 0.25);
       });
-    } catch {
-      // Ignore audio policy restrictions
-    }
+    } catch {}
   }
 
   // Print Complete celebration bell
@@ -78,9 +99,7 @@ class SoundFX {
         osc.start(now + i * 0.12);
         osc.stop(now + i * 0.12 + 0.6);
       });
-    } catch {
-      // Ignore audio policy restrictions
-    }
+    } catch {}
   }
 
   // Polygon Laser Mirror Spin-up Whine (Realistic Laser Printer Warmup)
@@ -109,7 +128,6 @@ class SoundFX {
     if (!ctx) return;
     try {
       const now = ctx.currentTime;
-      // Roller stepper pulse
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'triangle';
@@ -123,7 +141,6 @@ class SoundFX {
       osc.start(now);
       osc.stop(now + 0.55);
 
-      // Paper friction noise burst
       const bufferSize = ctx.sampleRate * 0.15;
       const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
       const output = buffer.getChannelData(0);
@@ -176,11 +193,8 @@ class SoundFX {
       gain.connect(ctx.destination);
       osc.start();
       osc.stop(ctx.currentTime + 0.25);
-    } catch {
-      // Ignore audio policy restrictions
-    }
+    } catch {}
   }
 }
 
 export const sounds = new SoundFX();
-

@@ -20,8 +20,34 @@ export const SEED_MACHINES: Machine[] = [
     internalTempCelsius: 24,
     isDoorOpen: false,
     qrCodeToken: 'QR_RIT_ATM_01_SECURE',
+    licenseKey: 'PRN-2026-RIT01-ACTV',
+    isActivated: true,
+    activatedAt: new Date().toISOString(),
     defaultPrinterModel: 'HP LaserJet Professional P1106',
     printerSpoolerName: 'HP LaserJet Professional P1106',
+    printerRouting: {
+      bwSinglePrinter: 'HP LaserJet Professional P1106',
+      bwDuplexPrinter: 'HP LaserJet Professional P1106',
+      colorSinglePrinter: 'Epson L3250 Series Color',
+      colorDuplexPrinter: 'Epson L3250 Series Color',
+      photoPrinter: 'Epson L3250 Series Photo',
+    },
+    featureToggles: {
+      enableBwSingle: true,
+      enableBwDuplex: true,
+      enableColorSingle: true,
+      enableColorDuplex: true,
+      enablePhotoPrint: true,
+      enableQrUpload: true,
+      enableDirectUsb: false,
+    },
+    pricingOverride: {
+      bwSinglePaise: 200,    // ₹2.00
+      bwDuplexPaise: 350,    // ₹3.50
+      colorSinglePaise: 1000,// ₹10.00
+      colorDuplexPaise: 1800,// ₹18.00
+      photoPaise: 2500,      // ₹25.00
+    },
     activePrinterStatus: 'connected',
     lastHeartbeatAt: new Date().toISOString(),
   }
@@ -149,7 +175,7 @@ class PrintAtmStore {
   }
 
   getOrderById(id: string): PrintOrder | undefined {
-    return this.orders.find(o => o.id === id);
+    return this.orders.find(o => o.id === id || o.orderNumber === id);
   }
 
   findAnyOrderByPin(pin: string): PrintOrder | undefined {

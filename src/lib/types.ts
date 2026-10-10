@@ -14,6 +14,24 @@ export type MachineStatus = 'online' | 'busy' | 'paper_low' | 'paper_empty' | 'm
 export type PaperStatus = 'ok' | 'low' | 'empty' | 'unknown';
 export type MachineDeploymentType = 'kiosk_atm' | 'xerox_shop';
 
+export interface PrinterRoutingConfig {
+  bwSinglePrinter: string;
+  bwDuplexPrinter: string;
+  colorSinglePrinter: string;
+  colorDuplexPrinter: string;
+  photoPrinter?: string;
+}
+
+export interface FeatureToggles {
+  enableBwSingle: boolean;
+  enableBwDuplex: boolean;
+  enableColorSingle: boolean;
+  enableColorDuplex: boolean;
+  enablePhotoPrint: boolean;
+  enableQrUpload: boolean;
+  enableDirectUsb: boolean;
+}
+
 export interface Machine {
   id: string;
   organizationId: string;
@@ -31,19 +49,30 @@ export interface Machine {
   isDoorOpen: boolean;
   qrCodeToken: string;
   ipAddress?: string;
+  
+  // Licensing & Activation
+  licenseKey?: string;
+  isActivated?: boolean;
+  activatedAt?: string;
+  hardwareFingerprint?: string;
+  
+  // Hardware Printer Configuration & Capability Routing
   defaultPrinterModel?: string;
-  // Hardware Printer Configuration
   printerConnectionType?: 'windows_spooler' | 'usb_raw' | 'network_ipp' | 'cups_linux';
   printerSpoolerName?: string;
   printerPortOrIp?: string;
   duplexHardwareCapable?: boolean;
   paperTrayCapacity?: number;
   daemonSecretToken?: string;
+  printerRouting?: PrinterRoutingConfig;
+  featureToggles?: FeatureToggles;
+  
   // Branding & Domain Mapping
   secondaryLogoUrl?: string; // Campus / College / Shop 2nd Logo
   customDomain?: string; // Custom Subdomain or Domain
   managerPhone?: string; // Kiosk Manager's WhatsApp number for alerts
   lowPaperThreshold?: number; // Alert threshold (default 50)
+  
   // Location & Geolocation Mapping (Qwikprint standard)
   latitude?: number;
   longitude?: number;
@@ -60,6 +89,7 @@ export interface Machine {
     bwDuplexPaise: number;
     colorSinglePaise: number;
     colorDuplexPaise: number;
+    photoPaise?: number;
   };
   earnings?: MachineEarningsMetrics;
 }
@@ -114,6 +144,7 @@ export interface PrintOrder {
   machineCode: string;
   machineName: string;
   customerPhone?: string;
+  customerName?: string;
   customerEmail?: string;
   
   // Document details

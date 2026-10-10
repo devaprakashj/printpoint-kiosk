@@ -3,6 +3,7 @@ import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
 import { db } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export async function GET(
   req: NextRequest,
@@ -14,14 +15,17 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Order ID required' }, { status: 400 });
     }
 
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
     let order: any = null;
 
     if (isSupabaseConfigured && supabaseAdmin) {
-      const { data, error } = await supabaseAdmin
-        .from('orders')
-        .select('*')
-        .eq('id', orderId)
-        .maybeSingle();
+      let query = supabaseAdmin.from('orders').select('*');
+      if (isUuid) {
+        query = query.eq('id', orderId);
+      } else {
+        query = query.eq('order_number', orderId);
+      }
+      const { data, error } = await query.maybeSingle();
 
       if (!error && data) {
         order = {
@@ -30,6 +34,7 @@ export async function GET(
           machineCode: data.machine_code,
           machineName: data.machine_name,
           customerPhone: data.customer_phone,
+          customerName: data.customer_name || 'Student',
           customerEmail: data.customer_email,
           fileName: data.file_name,
           fileSizeFormatted: data.file_size_formatted,
@@ -60,21 +65,37 @@ export async function GET(
       }
     }
 
-    if (!order) {
-      const dbOrder = db.getOrderById(orderId);
-      if (dbOrder) {
-        order = {
-          ...dbOrder,
-          totalAmountRupees: ((dbOrder.totalAmountPaise || 200) / 100).toFixed(2),
-        };
+    const dbOrder = db.getOrderById(orderId);
+    if (order && dbOrder) {
+      if (dbOrder.customerName && (!order.customerName || order.customerName === 'Student')) {
+        order.customerName = dbOrder.customerName;
       }
+      if (dbOrder.orderStatus === 'completed' || order.orderStatus === 'completed') {
+        order.orderStatus = 'completed';
+        order.paymentStatus = 'paid';
+      } else if (dbOrder.paymentStatus === 'paid' && order.paymentStatus !== 'paid') {
+        order.paymentStatus = 'paid';
+        order.orderStatus = dbOrder.orderStatus || 'paid_ready_to_print';
+      }
+    } else if (!order && dbOrder) {
+      order = {
+        ...dbOrder,
+        customerName: dbOrder.customerName || 'Student',
+        totalAmountRupees: ((dbOrder.totalAmountPaise || 200) / 100).toFixed(2),
+      };
     }
 
     if (!order) {
       return NextResponse.json({ success: false, error: 'Order not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ success: true, order });
+    return NextResponse.json({ success: true, order }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      },
+    });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Error fetching order';
     return NextResponse.json({ success: false, error: msg }, { status: 500 });

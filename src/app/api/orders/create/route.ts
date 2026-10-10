@@ -29,6 +29,7 @@ export async function POST(req: NextRequest) {
       colorMode = 'bw',
       duplexMode = 'simplex',
       customerPhone = '',
+      customerName = '',
     } = body;
 
     let machine: any = null;
@@ -137,7 +138,7 @@ export async function POST(req: NextRequest) {
     let newOrder: any = null;
 
     if (isSupabaseConfigured && supabaseAdmin) {
-      const { data: insData, error: insErr } = await supabaseAdmin.from('orders').insert({
+      const insertPayload: any = {
         order_number: orderNumber,
         machine_code: machine.machineCode,
         machine_name: machine.displayName,
@@ -161,7 +162,26 @@ export async function POST(req: NextRequest) {
         payment_status: 'pending',
         order_status: 'created',
         payment_gateway_order_id: paymentGatewayOrderId,
-      }).select().single();
+      };
+
+      if (customerName) {
+        insertPayload.customer_name = String(customerName).trim().substring(0, 50);
+      }
+
+      let insData: any = null;
+      let insErr: any = null;
+
+      const res = await supabaseAdmin.from('orders').insert(insertPayload).select().single();
+      insData = res.data;
+      insErr = res.error;
+
+      // If failed due to customer_name column missing, retry without it
+      if (insErr && insertPayload.customer_name) {
+        delete insertPayload.customer_name;
+        const retryRes = await supabaseAdmin.from('orders').insert(insertPayload).select().single();
+        insData = retryRes.data;
+        insErr = retryRes.error;
+      }
 
       if (!insErr && insData) {
         newOrder = {
@@ -170,6 +190,7 @@ export async function POST(req: NextRequest) {
           machineCode: insData.machine_code,
           machineName: insData.machine_name,
           customerPhone: insData.customer_phone,
+          customerName: insData.customer_name || (customerName ? String(customerName).trim() : 'Student'),
           fileName: insData.file_name,
           fileSizeFormatted: insData.file_size_formatted,
           detectedTotalPages: insData.detected_total_pages,
@@ -201,6 +222,7 @@ export async function POST(req: NextRequest) {
         machineCode: machine.machineCode,
         machineName: machine.displayName,
         customerPhone: customerPhone ? String(customerPhone).trim().substring(0, 15) : undefined,
+        customerName: customerName ? String(customerName).trim().substring(0, 50) : 'Student',
         fileName: String(primaryFileName),
         fileSizeFormatted: String(fileSizeFormatted),
         detectedTotalPages: grandTotalPrintPages,

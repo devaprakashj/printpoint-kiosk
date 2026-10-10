@@ -124,6 +124,13 @@ export async function GET(req: NextRequest) {
       pricingRules = db.getPricingRule('default');
     }
 
+    if (machines.length === 0) {
+      machines = db.getMachines();
+    }
+    if (!pricingRules) {
+      pricingRules = db.getPricingRule('default');
+    }
+
     // Calculate executive KPIs & Machine Earnings
     let totalRevenuePaise = 0;
     let todayRevenuePaise = 0;
@@ -303,6 +310,18 @@ export async function POST(req: NextRequest) {
         minimumOrderPaise: Number(minimumOrderPaise),
       });
       return NextResponse.json({ success: true, pricingRule: updated });
+    }
+
+    if (action === 'update_order_status') {
+      const { orderId, status } = payload;
+      if (isSupabaseConfigured && supabaseAdmin) {
+        await supabaseAdmin
+          .from('orders')
+          .update({ order_status: status })
+          .or(`id.eq.${orderId},order_number.eq.${orderId}`);
+      }
+      const updated = db.updateOrderStatus(orderId, status);
+      return NextResponse.json({ success: true, order: updated });
     }
 
     if (action === 'toggle_maintenance') {

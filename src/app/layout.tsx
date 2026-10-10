@@ -1,32 +1,24 @@
 import type { Metadata } from 'next';
-import { Lexend, Poppins } from 'next/font/google';
+import { Plus_Jakarta_Sans } from 'next/font/google';
 import Script from 'next/script';
 import './globals.css';
 
-const lexend = Lexend({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700', '800', '900'],
-  variable: '--font-lexend',
-  display: 'swap',
-});
-
-const poppins = Poppins({
+const jakarta = Plus_Jakarta_Sans({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700', '800'],
-  variable: '--font-poppins',
+  variable: '--font-jakarta',
   display: 'swap',
 });
 
 export const metadata: Metadata = {
-  title: 'PrintPoint | Print. Pay. Done. - Self-Service Printing Kiosks',
-  description: 'PrintPoint - Autonomous Self-Service Printing Kiosks & Xerox Station SaaS Platform',
+  title: 'SmartPrint | RIT Autonomous Campus Printing Kiosk',
+  description: 'SmartPrint - Autonomous Self-Service Printing Kiosks for Rajalakshmi Institute of Technology. Upload anywhere, get warm prints in 30 seconds.',
   icons: {
     icon: [
-      { url: '/printpoint-icon.svg', type: 'image/svg+xml' },
-      { url: '/logo.png', sizes: '32x32', type: 'image/png' },
+      { url: '/rit-logo.png', type: 'image/png' },
     ],
-    shortcut: '/printpoint-icon.svg',
-    apple: '/printpoint-icon.svg',
+    shortcut: '/rit-logo.png',
+    apple: '/rit-logo.png',
   },
 };
 
@@ -36,20 +28,20 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${lexend.variable} ${poppins.variable}`}>
+    <html lang="en" className={jakarta.variable}>
       <head>
-        <link rel="icon" type="image/svg+xml" href="/printpoint-icon.svg" />
-        <link rel="alternate icon" type="image/png" href="/logo.png" />
-        <link rel="apple-touch-icon" href="/printpoint-icon.svg" />
+        <link rel="icon" type="image/png" href="/rit-logo.png" />
+        <link rel="apple-touch-icon" href="/rit-logo.png" />
         <Script
           src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"
           strategy="beforeInteractive"
         />
       </head>
-      <body className={`${lexend.className} min-h-screen bg-mint-grid text-slate-900 antialiased selection:bg-[#00b51e] selection:text-white`}>
+      <body className={`${jakarta.className} min-h-screen bg-[#fafbfc] text-[#0a0a0a] antialiased selection:bg-[#2563eb] selection:text-white`}>
         {children}
       </body>
     </html>
   );
 }
+
 

@@ -62,32 +62,40 @@ export function calculateOrderPrice(req: PriceCalculationRequest): PriceCalculat
   const { pricingRule, totalPages, pageRangeStr, copies, colorMode, duplexMode } = req;
   
   const pagesPerCopy = calculatePagesFromRange(pageRangeStr, totalPages);
-  const totalPrintPages = pagesPerCopy * Math.max(1, copies);
+  const actualCopies = Math.max(1, copies);
+  const totalPrintPages = pagesPerCopy * actualCopies;
 
-  // Calculate physical sheets needed
-  let sheetsPerCopy: number;
-  if (duplexMode === 'duplex') {
-    sheetsPerCopy = Math.ceil(pagesPerCopy / 2);
+  const singlePaise = colorMode === 'bw' ? pricingRule.bwSinglePaise : pricingRule.colorSinglePaise;
+  const duplexPaise = colorMode === 'bw' ? pricingRule.bwDuplexPaise : pricingRule.colorDuplexPaise;
+
+  let totalSheets = 0;
+  let totalRawPaise = 0;
+
+  if (duplexMode === 'simplex' || (pagesPerCopy === 1 && actualCopies === 1)) {
+    // 1-sided printing
+    totalSheets = totalPrintPages;
+    totalRawPaise = totalPrintPages * singlePaise;
+  } else if (pagesPerCopy === 1 && actualCopies > 1) {
+    // 1-page document with multiple copies printed double-sided (back-to-back)
+    const fullDuplexSheets = Math.floor(actualCopies / 2);
+    const leftoverSimplex = actualCopies % 2;
+    totalSheets = Math.ceil(actualCopies / 2);
+    totalRawPaise = (fullDuplexSheets * duplexPaise) + (leftoverSimplex * singlePaise);
   } else {
-    sheetsPerCopy = pagesPerCopy;
-  }
-  const totalSheets = sheetsPerCopy * Math.max(1, copies);
+    // Multi-page document printed double-sided
+    const fullDuplexSheetsPerCopy = Math.floor(pagesPerCopy / 2);
+    const leftoverSimplexPerCopy = pagesPerCopy % 2;
+    const sheetsPerCopy = Math.ceil(pagesPerCopy / 2);
+    const costPerCopyPaise = (fullDuplexSheetsPerCopy * duplexPaise) + (leftoverSimplexPerCopy * singlePaise);
 
-  // Rate calculation per sheet / page
-  let ratePerSheetPaise = 0;
-  if (colorMode === 'bw') {
-    ratePerSheetPaise = duplexMode === 'duplex' 
-      ? pricingRule.bwDuplexPaise 
-      : pricingRule.bwSinglePaise;
-  } else {
-    ratePerSheetPaise = duplexMode === 'duplex' 
-      ? pricingRule.colorDuplexPaise 
-      : pricingRule.colorSinglePaise;
+    totalSheets = sheetsPerCopy * actualCopies;
+    totalRawPaise = costPerCopyPaise * actualCopies;
   }
 
-  const subtotalPaise = Math.max(pricingRule.minimumOrderPaise, totalSheets * ratePerSheetPaise);
+  const subtotalPaise = Math.max(pricingRule.minimumOrderPaise, totalRawPaise);
   const taxPaise = 0; // In India, student print kiosks often include tax in round-figure pricing
   const totalAmountPaise = subtotalPaise + taxPaise;
+  const ratePerSheetPaise = singlePaise;
 
   return {
     pagesToPrintPerCopy: pagesPerCopy,
