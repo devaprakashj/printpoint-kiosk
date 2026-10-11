@@ -30,6 +30,7 @@ import {
   Share2, 
   Download, 
   ArrowRight, 
+  ArrowLeft, 
   Sparkles, 
   MapPin, 
   Clock, 
@@ -111,6 +112,8 @@ export default function QwikprintAuthenticApp() {
   const [showPhoneVerifyModal, setShowPhoneVerifyModal] = useState(false);
   const [phoneInput, setPhoneInput] = useState<string>('');
   const [nameInput, setNameInput] = useState<string>('');
+  const [phoneError, setPhoneError] = useState<string>('');
+  const [nameError, setNameError] = useState<string>('');
   const [billDetailsOpen, setBillDetailsOpen] = useState(true);
   const [uploadedFilesOpen, setUploadedFilesOpen] = useState(true);
 
@@ -223,13 +226,18 @@ export default function QwikprintAuthenticApp() {
     if (uploadStage === 'success' && isProcessingModal) {
       timer = setTimeout(() => {
         setIsProcessingModal(false);
-        setCurrentStep('files_uploaded_list');
+        // If single file uploaded, skip intermediate list and go directly to Configure Settings
+        if (filesList.length <= 1) {
+          setCurrentStep('configure_settings');
+        } else {
+          setCurrentStep('files_uploaded_list');
+        }
       }, 2000);
     }
     return () => {
       if (timer) clearTimeout(timer);
     };
-  }, [uploadStage, isProcessingModal]);
+  }, [uploadStage, isProcessingModal, filesList.length]);
 
   // 1. Session Auto-Restore on Page Refresh / Tab Reload
   useEffect(() => {
@@ -1403,26 +1411,57 @@ export default function QwikprintAuthenticApp() {
     }
   };
 
+  // Check if customer name and valid 10-digit phone exist before proceeding to summary
+  const handleProceedClick = () => {
+    sounds.keyPress();
+    const cleaned = (customerPhone || phoneInput || '').replace(/\D/g, '');
+    const hasName = Boolean((customerName || nameInput || '').trim());
+
+    if (cleaned.length !== 10 || !hasName) {
+      setShowPhoneVerifyModal(true);
+    } else {
+      handlePayAndGeneratePin();
+    }
+  };
+
   // Checkout & Pay via Razorpay (Supports UPI, GPay, PhonePe, Cards, NetBanking)
-  const handlePayAndGeneratePin = async () => {
-    if (filesList.length === 0) return;
+  const handlePayAndGeneratePin = async (overrideCustomer?: { phone?: string; name?: string } | React.MouseEvent) => {
+    if (filesList.length === 0 && blankSheetCount === 0) return;
+
+    const isClickEvent = overrideCustomer && typeof overrideCustomer === 'object' && 'preventDefault' in overrideCustomer;
+    const overrideData = isClickEvent ? undefined : (overrideCustomer as { phone?: string; name?: string } | undefined);
+
+    const finalPhone = overrideData?.phone || customerPhone || phoneInput;
+    const finalName = overrideData?.name || customerName || nameInput;
+    const cleanedPhone = (finalPhone || '').replace(/\D/g, '');
+    const validName = (finalName || '').trim();
+
+    // STRICT CHECK: Student Name & 10-digit WhatsApp phone MUST be present
+    if (cleanedPhone.length !== 10 || !validName) {
+      setShowPhoneVerifyModal(true);
+      return;
+    }
 
     setIsProcessingPay(true);
     setPaymentFailure(null);
 
     try {
-      const primaryFileName = filesList.map(f => f.name).join(', ');
+      const isBlankSheets = filesList.length === 0 && blankSheetCount > 0;
+      const primaryFileName = isBlankSheets 
+        ? `${blankSheetCount} Blank A4 Sheets` 
+        : filesList.map(f => f.name).join(', ');
 
-      const res = await fetch('/api/orders/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          machineCode: selectedMachineCode,
-          fileName: primaryFileName,
-          fileSizeFormatted: `${filesList.length} Files`,
-          customerPhone: customerPhone || phoneInput || '8667466390',
-          customerName: customerName || nameInput || 'Student',
-          documents: filesList.map(f => ({
+      const documentsPayload = isBlankSheets
+        ? [{
+            name: `${blankSheetCount} Blank A4 Sheets`,
+            pages: blankSheetCount,
+            copies: 1,
+            colorMode: 'bw' as ColorMode,
+            duplexMode: 'simplex' as DuplexMode,
+            selectedPagesCount: blankSheetCount,
+            pageRangeStr: `1-${blankSheetCount}`,
+          }]
+        : filesList.map(f => ({
             name: f.name,
             pages: f.pages || 1,
             copies: f.copies || 1,
@@ -1430,31 +1469,44 @@ export default function QwikprintAuthenticApp() {
             duplexMode: f.duplexMode || 'simplex',
             selectedPagesCount: f.pageSelectionType === 'range' && f.selectedPages?.length ? f.selectedPages.length : (f.pages || 1),
             pageRangeStr: f.customRangeInput || 'all',
-          })),
+          }));
+
+      const res = await fetch('/api/orders/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          machineCode: selectedMachineCode,
+          fileName: primaryFileName,
+          fileSizeFormatted: isBlankSheets ? `${blankSheetCount} Sheets` : `${filesList.length} Files`,
+          customerPhone: cleanedPhone,
+          customerName: validName,
+          documents: documentsPayload,
         }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
 
       // Securely upload physical document files to Supabase Storage Bucket ('printpoint-documents') in parallel
-      await Promise.all(
-        filesList.map(async (f) => {
-          if (f.file) {
-            try {
-              const formData = new FormData();
-              formData.append('file', f.file);
-              formData.append('orderId', data.order.id);
-              formData.append('fileName', f.name);
-              await fetch('/api/documents/upload', {
-                method: 'POST',
-                body: formData,
-              });
-            } catch (e) {
-              console.warn('Document storage upload notice:', e);
+      if (filesList.length > 0) {
+        await Promise.all(
+          filesList.map(async (f) => {
+            if (f.file) {
+              try {
+                const formData = new FormData();
+                formData.append('file', f.file);
+                formData.append('orderId', data.order.id);
+                formData.append('fileName', f.name);
+                await fetch('/api/documents/upload', {
+                  method: 'POST',
+                  body: formData,
+                });
+              } catch (e) {
+                console.warn('Document storage upload notice:', e);
+              }
             }
-          }
-        })
-      );
+          })
+        );
+      }
 
       // Clear print session storage so next visit is clean
       if (typeof window !== 'undefined') {
@@ -1485,7 +1537,7 @@ export default function QwikprintAuthenticApp() {
 
   return (
     <div className={`bg-futuristic-grid text-slate-900 flex flex-col font-sans selection:bg-blue-600 selection:text-white ${
-      currentStep === 'configure_settings'
+      currentStep === 'configure_settings' || currentStep === 'blank_sheets'
         ? 'min-h-screen lg:h-screen lg:max-h-screen lg:overflow-hidden justify-between'
         : 'min-h-screen'
     }`}>
@@ -1499,37 +1551,58 @@ export default function QwikprintAuthenticApp() {
         className="hidden"
       />
 
-      {/* ================= TOP NAVIGATION BAR (Clean Header with PrintIt Logo & Location) ================= */}
-      <header className="px-3 xs:px-4 py-2 sm:py-2.5 sm:px-8 max-w-7xl mx-auto w-full flex items-center justify-between shrink-0 gap-2">
-        {/* Brand Logo & Location Dropdown */}
-        <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-          <Logo size="sm" />
+      {/* ================= TOP NAVIGATION BAR (Clean Header with Brand Logo & Support) ================= */}
+      <header className="px-3 xs:px-4 py-2.5 xs:py-3 sm:py-3.5 sm:px-8 max-w-7xl mx-auto w-full flex items-center justify-between gap-2 shrink-0">
+        {/* Brand Logo */}
+        <Logo size="sm" className="shrink-0" />
 
-          <span className="hidden sm:inline-block w-px h-5 bg-slate-200 shrink-0" />
-
-          {/* Location Dropdown */}
-          <div className="relative min-w-0">
+        {/* Right Action Buttons */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {currentStep === 'configure_settings' || currentStep === 'files_uploaded_list' ? (
             <button
               type="button"
-              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              className="flex items-center gap-1.5 text-left group cursor-pointer min-w-0"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 transition-all cursor-pointer shrink-0"
             >
-              <div className="min-w-0">
-                <div className="flex items-center gap-1 min-w-0">
-                  <span className="font-bold text-xs sm:text-sm text-slate-900 group-hover:text-[#2563eb] transition-colors truncate max-w-[130px] xs:max-w-[200px] sm:max-w-none block">
-                    {currentMachine?.displayName || 'Library Ground Floor Kiosk 01'}
-                  </span>
-                  <ChevronDown className="h-3.5 w-3.5 text-slate-600 group-hover:text-[#2563eb] shrink-0" />
-                </div>
-                <p className="hidden sm:block text-[10px] sm:text-[11px] font-semibold text-slate-500 uppercase tracking-wider truncate">
-                  {currentMachine?.organizationName || 'RIT CHENNAI'}
-                </p>
-              </div>
+              <UploadCloud className="h-3.5 w-3.5 text-slate-600" />
+              <span>Upload</span>
             </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowHelpModal(true)}
+              className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 xs:px-3.5 py-1.5 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 hover:border-slate-300 transition-all cursor-pointer shrink-0"
+            >
+              <HelpCircle className="h-3.5 w-3.5 text-slate-500 shrink-0" />
+              <span className="hidden xs:inline">Help</span>
+            </button>
+          )}
+        </div>
+      </header>
 
-            {/* Dropdown Menu */}
-            {isDropdownOpen && (
-              <div className="absolute left-0 top-full mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl z-50 animate-fade-in">
+      {/* ================= LOCATION SELECTOR STRIP (Cleanly Below Header) ================= */}
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-8 pt-1 pb-2 flex items-center justify-center shrink-0">
+        <div className="relative inline-block">
+          <button
+            type="button"
+            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+            className="inline-flex items-center gap-1.5 xs:gap-2 px-3.5 py-1.5 rounded-full bg-white/90 hover:bg-white border border-slate-200/90 hover:border-blue-300 shadow-2xs hover:shadow-xs text-left group cursor-pointer transition-all backdrop-blur-xs"
+          >
+            <MapPin className="w-3.5 h-3.5 text-[#2563eb] shrink-0" />
+            <span className="font-bold text-xs sm:text-sm text-slate-900 group-hover:text-[#2563eb] transition-colors truncate max-w-[210px] xs:max-w-[320px] sm:max-w-none">
+              {currentMachine?.displayName?.replace(/^Print ATM\s*-\s*/i, '') || 'Main Campus Hub'}
+            </span>
+            <ChevronDown className={`h-3 w-3 text-slate-400 group-hover:text-[#2563eb] shrink-0 transition-transform ${isDropdownOpen ? 'rotate-180 text-[#2563eb]' : ''}`} />
+          </button>
+
+          {/* Dropdown Menu with Click-Away Backdrop */}
+          {isDropdownOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-40"
+                onClick={() => setIsDropdownOpen(false)}
+              />
+              <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-72 xs:w-80 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl z-50 animate-fade-in">
                 <span className="px-3 py-1.5 text-[10px] font-bold uppercase text-slate-400 block">Select Print ATM Kiosk:</span>
                 {machines.map((m) => (
                   <button
@@ -1559,6 +1632,7 @@ export default function QwikprintAuthenticApp() {
                 <div className="pt-2 border-t border-slate-100 mt-1">
                   <Link
                     href="/select-location"
+                    onClick={() => setIsDropdownOpen(false)}
                     className="w-full rounded-xl px-3 py-2 text-xs font-bold text-[#2563eb] bg-blue-50 hover:bg-blue-100 flex items-center justify-between transition-colors shadow-2xs"
                   >
                     <span className="flex items-center gap-1.5">
@@ -1569,55 +1643,35 @@ export default function QwikprintAuthenticApp() {
                   </Link>
                 </div>
               </div>
-            )}
-          </div>
-        </div>
-
-        {/* Right Action Buttons */}
-        <div className="flex items-center gap-2">
-          {currentStep === 'configure_settings' || currentStep === 'files_uploaded_list' ? (
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 transition-all cursor-pointer"
-            >
-              <UploadCloud className="h-3.5 w-3.5 text-slate-600" />
-              <span>Upload</span>
-            </button>
-          ) : (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setShowHelpModal(true)}
-                className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 hover:border-slate-300 transition-all cursor-pointer"
-              >
-                <HelpCircle className="h-4 w-4 text-slate-500" />
-                <span>Help</span>
-              </button>
-            </div>
+            </>
           )}
         </div>
-      </header>
+      </div>
 
       {/* ================= MAIN CONTENT CONTAINER ================= */}
       <main className={`flex-1 mx-auto w-full px-4 sm:px-6 lg:px-8 transition-all duration-300 ${
         currentStep === 'configure_settings' || currentStep === 'pin_success'
-          ? 'max-w-6xl flex flex-col justify-center py-2 sm:py-4'
+          ? 'max-w-6xl flex flex-col justify-center py-3 sm:py-5'
+          : currentStep === 'blank_sheets'
+          ? 'max-w-4xl flex flex-col justify-center py-1 sm:py-2 lg:py-3'
           : currentStep === 'upload_landing'
-          ? 'max-w-5xl space-y-4 pb-20 pt-2 sm:pt-3'
-          : 'max-w-3xl space-y-4 pb-28 pt-4 sm:pt-6'
+          ? 'max-w-5xl space-y-6 pb-20 pt-2 xs:pt-3 sm:pt-5'
+          : 'max-w-3xl space-y-6 pb-28 pt-4 sm:pt-6'
       }`}>
         {/* ================= STEP A: INITIAL UPLOAD BOX & FULL LANDING EXPERIENCE ================= */}
         {currentStep === 'upload_landing' && (
-          <div className="space-y-4 animate-fade-in">
+          <div className="space-y-6 animate-fade-in">
             {/* 1. HERO BANNER SECTION (Compact & Above-the-fold) */}
-            <div className="text-center space-y-2 pt-1">
-              <div className="max-w-2xl mx-auto space-y-1">
-                <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-slate-900 tracking-tight leading-tight">
-                  Print Anywhere. <span className="bg-gradient-to-r from-[#2563eb] to-[#1d4ed8] bg-clip-text text-transparent">Collect in 30 Seconds.</span>
+            <div className="text-center space-y-1.5 pt-1 xs:pt-2 px-2">
+              <div className="max-w-xl mx-auto space-y-1.5">
+                <h1 className="text-xl xs:text-2xl sm:text-3xl lg:text-4xl font-black text-slate-900 tracking-tight leading-snug sm:leading-tight text-balance">
+                  Print Lab Records & Notes.{' '}
+                  <span className="bg-gradient-to-r from-[#2563eb] to-[#1d4ed8] bg-clip-text text-transparent">
+                    Collect in 30 Seconds.
+                  </span>
                 </h1>
-                <p className="text-xs text-slate-500 font-medium max-w-lg mx-auto">
-                  Upload documents from mobile, pay securely via UPI & grab instant prints at any nearby campus kiosk.
+                <p className="text-xs sm:text-sm text-slate-500 font-medium max-w-md mx-auto text-balance leading-relaxed">
+                  Upload from your phone, pay securely via UPI & grab instant prints at the campus kiosk with your 4-digit PIN.
                 </p>
               </div>
             </div>
@@ -1627,21 +1681,18 @@ export default function QwikprintAuthenticApp() {
               {/* Main Document Dropzone (Spans 8 cols on desktop) */}
               <div className="md:col-span-8 rounded-3xl border border-slate-200/90 bg-white p-5 sm:p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col justify-between space-y-4 hover:border-blue-300 transition-all">
                 {/* Header Strip */}
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100 gap-2">
-                  <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
-                    <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                <div className="flex items-center pb-3 border-b border-slate-100 gap-2">
+                  <div className="flex items-start gap-2 sm:gap-2.5 min-w-0">
+                    <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0 mt-1 sm:mt-1.5" />
                     <div className="min-w-0">
                       <h2 className="text-xs xs:text-sm sm:text-base font-black text-slate-900 leading-tight">
-                        Upload Documents for Instant Laser Print
+                        Upload Lab Records, Notes & Assignments
                       </h2>
                       <p className="text-[10px] xs:text-[11px] text-slate-400 font-medium mt-0.5">
-                        Zero-wait cloud dispatch • Auto-scaled for standard A4
+                        Zero-queue laser print • Auto-scaled for standard A4 record & assignment submissions
                       </p>
                     </div>
                   </div>
-                  <span className="px-2.5 xs:px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200/80 font-mono text-[10px] xs:text-xs font-bold shrink-0 whitespace-nowrap">
-                    From ₹2 / pg
-                  </span>
                 </div>
 
                 {/* Tactile Interactive Drop Target */}
@@ -1672,20 +1723,20 @@ export default function QwikprintAuthenticApp() {
                   <div className="space-y-1 relative z-10">
                     <div className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-extrabold text-xs shadow-md shadow-blue-500/25 group-hover:shadow-lg group-hover:shadow-blue-500/35 transition-all">
                       <UploadCloud className="w-4 h-4 stroke-[2.4]" />
-                      <span>Browse Files from Device</span>
+                      <span>Select College Documents from Device</span>
                     </div>
                     <p className="text-xs text-slate-600 font-semibold pt-1">
-                      or drag & drop your files directly here
+                      or drag & drop your Records, Notes & PPT slides here
                     </p>
                   </div>
 
                   {/* Supported Badges Row */}
                   <div className="flex items-center justify-center gap-1.5 flex-wrap text-[10px] font-bold text-slate-400 pt-1 relative z-10">
-                    <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600">PDF</span>
-                    <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600">DOCX</span>
-                    <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600">PPTX</span>
-                    <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600">JPG / PNG</span>
-                    <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600">Excel</span>
+                    <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600">Lab Records</span>
+                    <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600">Assignments</span>
+                    <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600">Notes & PPTs</span>
+                    <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600">Hall Tickets</span>
+                    <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600">PDF / DOCX</span>
                     <span className="text-slate-300">•</span>
                     <span>Max 50 MB</span>
                   </div>
@@ -1736,10 +1787,10 @@ export default function QwikprintAuthenticApp() {
 
                   <div className="space-y-1 text-center sm:text-left">
                     <h3 className="text-base font-black text-slate-900 group-hover:text-blue-600 transition-colors">
-                      Buy Plain A4 Paper
+                      Need Blank A4 Paper?
                     </h3>
                     <p className="text-xs text-slate-500 leading-snug">
-                      Get empty A4 white sheets directly from the kiosk for exams, records & rough work.
+                      Get clean blank A4 sheets directly from the kiosk for exams, records & rough work.
                     </p>
                   </div>
                 </div>
@@ -1747,12 +1798,12 @@ export default function QwikprintAuthenticApp() {
                 {/* Bottom Action Strip */}
                 <div className="pt-3 flex items-center justify-between border-t border-slate-200/80 mt-3">
                   <div>
-                    <span className="text-[10px] text-slate-400 font-medium block">Fixed Price</span>
-                    <span className="font-mono font-black text-sm text-slate-900">₹2.00 / sheet</span>
+                    <span className="text-[10px] text-slate-400 font-medium block">Price</span>
+                    <span className="font-mono font-black text-sm text-slate-900">₹2 / sheet</span>
                   </div>
 
                   <span className="px-3.5 py-1.5 rounded-xl bg-slate-900 text-white group-hover:bg-[#2563eb] text-xs font-bold flex items-center gap-1 transition-all shadow-xs group-hover:translate-x-0.5">
-                    <span>Buy Paper</span>
+                    <span>Buy A4 Paper</span>
                     <span>&rarr;</span>
                   </span>
                 </div>
@@ -1762,8 +1813,8 @@ export default function QwikprintAuthenticApp() {
             {/* 3. 3-STEP "HOW IT WORKS" VISUAL JOURNEY */}
             <div className="rounded-3xl border border-blue-200/80 bg-white p-7 shadow-sm space-y-6">
               <div className="text-center space-y-1">
-                <h2 className="text-xl font-extrabold text-slate-900">How SmartPrint RIT Kiosk Works</h2>
-                <p className="text-xs text-slate-500 font-medium">3 simple steps to get your documents printed in under 60 seconds</p>
+                <h2 className="text-xl font-extrabold text-slate-900">How RIT Campus SmartPrint Kiosk Works</h2>
+                <p className="text-xs text-slate-500 font-medium">Skip the crowded xerox shop queue in 3 simple steps</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -1772,9 +1823,9 @@ export default function QwikprintAuthenticApp() {
                     1
                   </div>
                   <div>
-                    <h3 className="font-extrabold text-sm text-slate-900">Upload & Configure</h3>
+                    <h3 className="font-extrabold text-sm text-slate-900">1. Upload from Mobile / Laptop</h3>
                     <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                      Upload any PDF, Word file, or Image from your phone. Choose B&W, Color, Duplex, or Copies.
+                      Upload your lab record PDF, assignment, or study notes. Choose B&W, Color, Single or Both sides (Duplex).
                     </p>
                   </div>
                 </div>
@@ -1784,9 +1835,9 @@ export default function QwikprintAuthenticApp() {
                     2
                   </div>
                   <div>
-                    <h3 className="font-extrabold text-sm text-slate-900">Pay & Get WhatsApp PIN</h3>
+                    <h3 className="font-extrabold text-sm text-slate-900">2. Quick UPI & Instant PIN</h3>
                     <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                      Pay instantly with any UPI app (GPay, PhonePe, Paytm). Your secret 4-digit PIN is sent directly to your WhatsApp.
+                      Pay in 5 seconds via GPay, PhonePe, or Paytm. Your secret 4-digit pickup PIN is sent straight to your WhatsApp.
                     </p>
                   </div>
                 </div>
@@ -1796,144 +1847,224 @@ export default function QwikprintAuthenticApp() {
                     3
                   </div>
                   <div>
-                    <h3 className="font-extrabold text-sm text-slate-900">Collect at ATM Kiosk</h3>
+                    <h3 className="font-extrabold text-sm text-slate-900">3. Collect at Campus Kiosk</h3>
                     <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                      Walk up to any RIT Campus SmartPrint Kiosk. Tap your 4-digit PIN on the touchscreen and grab your prints in seconds!
+                      Walk up to your selected Print ATM Kiosk. Punch your 4-digit PIN on the touchscreen & grab your prints instantly!
                     </p>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* FOOTER */}
-            <footer className="border-t border-blue-200/70 pt-6 pb-2 text-center text-xs text-slate-500 space-y-3">
-              <div className="flex items-center justify-center gap-6 font-bold text-slate-700 flex-wrap">
-                <button type="button" onClick={() => setShowHelpModal(true)} className="hover:text-[#2563eb]">
-                  How to Use
-                </button>
-              </div>
-              <p className="text-[11px] text-slate-400">
-                © 2026 SmartPrint • Rajalakshmi Institute of Technology (RIT Chennai). Fast • Contactless • Secure.
-              </p>
-            </footer>
+            {/* Subtle Clean Footer */}
+            <p className="text-center text-[11px] text-slate-400 pt-2 pb-6 font-medium">
+              © 2026 SmartPrint • Rajalakshmi Institute of Technology (RIT Chennai)
+            </p>
           </div>
         )}
 
-        {/* ================= STEP: DEDICATED BLANK A4 SHEETS SCREEN ================= */}
+        {/* ================= STEP: DEDICATED BLANK A4 SHEETS SCREEN (DESKTOP BALANCED FRAME) ================= */}
         {currentStep === 'blank_sheets' && (
-          <div className="space-y-6 animate-fade-in max-w-2xl mx-auto w-full">
-            {/* Top Hero Section */}
-            <div className="flex flex-col items-center text-center space-y-3 pt-2">
-              {/* Sleek Visual */}
-              <div className="relative w-20 h-24">
-                <svg
-                  viewBox="0 0 100 120"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="w-full h-full drop-shadow-md"
-                >
-                  <rect x="20" y="14" width="60" height="84" rx="7" fill="#f1f5f9" stroke="#cbd5e1" strokeWidth="1.2" />
-                  <rect x="12" y="6" width="60" height="84" rx="7" fill="#ffffff" stroke="#2563eb" strokeWidth="1.5" />
-                  <path d="M56 6V18C56 19.5 57.5 21 59 21H72" fill="#e2e8f0" stroke="#2563eb" strokeWidth="1.2" />
-                  <path d="M56 6L72 21V6H56Z" fill="#dbeafe" />
-                  <rect x="22" y="58" width="40" height="18" rx="5" fill="#eff6ff" stroke="#93c5fd" strokeWidth="1" />
-                  <text x="42" y="71" textAnchor="middle" fill="#2563eb" fontFamily="Poppins, sans-serif" fontWeight="800" fontSize="11">A4</text>
-                </svg>
-                <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-[#2563eb] text-white flex items-center justify-center shadow-md">
-                  <CheckCircle2 className="w-4 h-4" />
-                </div>
-              </div>
+          <div className="animate-fade-in max-w-4xl mx-auto w-full py-1 sm:py-2">
+            {/* Top Back Navigation Strip */}
+            <div className="flex items-center justify-between pb-2 sm:pb-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.keyPress();
+                  setCurrentStep('upload_landing');
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 hover:text-[#2563eb] transition-all shadow-2xs cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Back to Document Upload</span>
+              </button>
 
-              <div className="text-center space-y-1">
-                <h2 className="text-xl sm:text-2xl font-black text-slate-900">
-                  Blank A4 Sheets
-                </h2>
-                <div className="flex items-center justify-center gap-2 text-xs font-semibold text-slate-500">
-                  <span>Premium 80 GSM</span>
-                  <span>•</span>
-                  <span>Crisp Ultra-White</span>
-                </div>
-              </div>
-
-              {/* Price Pill */}
-              <div className="inline-flex items-center px-4 py-1.5 rounded-full bg-[#2563eb] text-white text-xs font-black shadow-sm">
-                ₹ 2 / sheet
-              </div>
+              <span className="text-[11px] font-bold text-slate-400 font-mono">
+                Campus Stationery Service
+              </span>
             </div>
 
-            {/* How many sheets card */}
-            <div className="rounded-3xl border border-slate-200/90 bg-white p-6 sm:p-8 shadow-sm space-y-5">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm sm:text-base font-extrabold text-slate-900">
-                  Select Quantity
-                </h3>
-                {blankSheetCount > 0 && (
-                  <span className="text-xs font-bold text-[#2563eb] bg-blue-50 px-3 py-1 rounded-full border border-[#2563eb]/20">
-                    Total: ₹{blankSheetCount * 2}
-                  </span>
-                )}
-              </div>
-
-              {/* Large Stepper Box */}
-              <div className="rounded-2xl border border-slate-200/90 p-4 sm:p-5 flex items-center justify-between bg-slate-50/50">
-                <button
-                  type="button"
-                  onClick={() => {
-                    sounds.keyPress();
-                    setBlankSheetCount((prev) => Math.max(0, prev - 1));
-                  }}
-                  disabled={blankSheetCount === 0}
-                  className="w-12 h-12 rounded-xl border border-slate-200 bg-white flex items-center justify-center text-2xl font-bold text-slate-700 hover:bg-slate-100 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all cursor-pointer shadow-2xs"
-                >
-                  -
-                </button>
-
-                <div className="text-center">
-                  <div className="text-3xl sm:text-4xl font-black text-slate-900 font-mono">
-                    {blankSheetCount}
-                  </div>
-                  <div className="text-xs text-slate-500 font-medium mt-0.5">
-                    {blankSheetCount === 1 ? 'Sheet' : 'Sheets'}
+            {/* Desktop Unified 2-Column Card / Mobile Balanced Stack */}
+            <div className="rounded-3xl border border-slate-200/90 bg-white p-4 sm:p-6 lg:p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] grid grid-cols-1 md:grid-cols-12 gap-4 lg:gap-6 items-center">
+              
+              {/* Left Column (5 cols on desktop): Visual & Info */}
+              <div className="md:col-span-5 flex flex-col items-center md:items-start text-center md:text-left space-y-2.5 md:border-r md:border-slate-100 md:pr-6">
+                {/* Visual */}
+                <div className="relative w-12 h-16 sm:w-16 sm:h-20 shrink-0">
+                  <svg
+                    viewBox="0 0 100 120"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="w-full h-full drop-shadow-md"
+                  >
+                    <rect x="20" y="14" width="60" height="84" rx="7" fill="#f1f5f9" stroke="#cbd5e1" strokeWidth="1.2" />
+                    <rect x="12" y="6" width="60" height="84" rx="7" fill="#ffffff" stroke="#2563eb" strokeWidth="1.5" />
+                    <path d="M56 6V18C56 19.5 57.5 21 59 21H72" fill="#e2e8f0" stroke="#2563eb" strokeWidth="1.2" />
+                    <path d="M56 6L72 21V6H56Z" fill="#dbeafe" />
+                    <rect x="22" y="58" width="40" height="18" rx="5" fill="#eff6ff" stroke="#93c5fd" strokeWidth="1" />
+                    <text x="42" y="71" textAnchor="middle" fill="#2563eb" fontFamily="Poppins, sans-serif" fontWeight="800" fontSize="11">A4</text>
+                  </svg>
+                  <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-[#2563eb] text-white flex items-center justify-center shadow-md">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    sounds.keyPress();
-                    setBlankSheetCount((prev) => Math.min(100, prev + 1));
-                  }}
-                  className="w-12 h-12 rounded-xl bg-[#2563eb] hover:bg-[#1d4ed8] text-white flex items-center justify-center text-2xl font-bold active:scale-95 transition-all shadow-md shadow-blue-500/20 cursor-pointer"
-                >
-                  +
-                </button>
+                <div className="space-y-1.5">
+                  <h2 className="text-base sm:text-lg lg:text-xl font-black text-slate-900 tracking-tight leading-tight">
+                    Blank A4 Sheets for Lab & Exams
+                  </h2>
+                  <div className="flex items-center justify-center md:justify-start gap-1.5 flex-wrap">
+                    <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-bold border border-slate-200">
+                      80 GSM Bond Paper
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[10px] font-bold border border-blue-200/80 font-mono">
+                      ₹2 / sheet
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                    Fresh white sheets dispensed directly from the kiosk for records, cycle tests & rough work.
+                  </p>
+                </div>
               </div>
 
-              {/* Preset Buttons Row */}
-              <div className="grid grid-cols-4 gap-2 sm:gap-3">
-                {[10, 25, 50, 100].map((preset) => (
+              {/* Right Column (7 cols on desktop): Stepper, Presets & Checkout */}
+              <div className="md:col-span-7 space-y-3.5">
+                <div className="flex items-center justify-between pb-1.5 border-b border-slate-100">
+                  <h3 className="text-xs sm:text-sm font-extrabold text-slate-900">
+                    Select Number of Sheets
+                  </h3>
+                  {blankSheetCount > 0 ? (
+                    <span className="text-xs font-bold text-[#2563eb] bg-blue-50 px-2.5 py-0.5 rounded-full border border-[#2563eb]/20 font-mono">
+                      Total: ₹{blankSheetCount * 2}
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-medium text-slate-400">
+                      Choose quantity below
+                    </span>
+                  )}
+                </div>
+
+                {/* Large Stepper Box */}
+                <div className="rounded-2xl border border-slate-200/90 p-2.5 sm:p-3 flex items-center justify-between bg-slate-50/60">
                   <button
-                    key={preset}
                     type="button"
                     onClick={() => {
                       sounds.keyPress();
-                      setBlankSheetCount(preset);
+                      setBlankSheetCount((prev) => Math.max(0, prev - 1));
                     }}
-                    className={`py-2.5 rounded-xl border text-center font-bold text-xs sm:text-sm transition-all active:scale-95 cursor-pointer ${
-                      blankSheetCount === preset
-                        ? 'border-[#2563eb] bg-blue-50 text-[#2563eb] shadow-xs'
-                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+                    disabled={blankSheetCount === 0}
+                    className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl border border-slate-200 bg-white flex items-center justify-center text-xl font-bold text-slate-700 hover:bg-slate-100 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all cursor-pointer shadow-2xs"
+                  >
+                    -
+                  </button>
+
+                  <div className="text-center">
+                    <div className="text-2xl sm:text-3xl font-black text-slate-900 font-mono leading-none">
+                      {blankSheetCount}
+                    </div>
+                    <div className="text-[11px] text-slate-500 font-medium mt-1">
+                      {blankSheetCount === 1 ? 'Sheet' : 'Sheets'}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sounds.keyPress();
+                      setBlankSheetCount((prev) => Math.min(100, prev + 1));
+                    }}
+                    className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-[#2563eb] hover:bg-[#1d4ed8] text-white flex items-center justify-center text-xl font-bold active:scale-95 transition-all shadow-md shadow-blue-500/20 cursor-pointer"
+                  >
+                    +
+                  </button>
+                </div>
+
+                {/* Preset Buttons */}
+                <div className="grid grid-cols-4 gap-2">
+                  {[10, 25, 50, 100].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => {
+                        sounds.keyPress();
+                        setBlankSheetCount(preset);
+                      }}
+                      className={`py-1.5 px-1 rounded-xl border text-center transition-all active:scale-95 cursor-pointer ${
+                        blankSheetCount === preset
+                          ? 'border-[#2563eb] bg-blue-50 text-[#2563eb] shadow-xs'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className="font-black text-xs sm:text-sm block">{preset}</span>
+                      <span className="text-[9px] sm:text-[10px] opacity-75 font-semibold block leading-tight">sheets</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Bottom Action Strip with Price & Proceed */}
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-3">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block font-medium">Price: ₹2 / sheet</span>
+                    <span className="font-mono font-black text-base sm:text-lg text-slate-900">
+                      ₹{blankSheetCount * 2}.00
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={blankSheetCount === 0}
+                    onClick={() => {
+                      sounds.keyPress();
+                      const blankDoc: UploadedDocument = {
+                        id: `blank-a4-${Date.now()}`,
+                        name: `${blankSheetCount}x Blank A4 Sheets (80 GSM)`,
+                        sizeFormatted: `${blankSheetCount} Sheets`,
+                        pages: blankSheetCount,
+                        pageThumbnails: [],
+                        copies: 1,
+                        colorMode: 'bw',
+                        duplexMode: 'simplex',
+                        orientation: 'portrait',
+                        pageSelectionType: 'all',
+                        selectedPages: Array.from({ length: blankSheetCount }, (_, i) => i + 1),
+                        customRangeInput: `1-${blankSheetCount}`,
+                        isImage: false,
+                        file: new File([''], 'Blank-Paper.pdf', { type: 'application/pdf' }),
+                      };
+                      setFilesList([blankDoc]);
+                      setSelectedDocId(blankDoc.id);
+                      const totalPaise = blankSheetCount * 200;
+                      setPriceQuote({
+                        pagesToPrintPerCopy: blankSheetCount,
+                        totalPrintPages: blankSheetCount,
+                        totalSheets: blankSheetCount,
+                        ratePerSheetPaise: 200,
+                        subtotalPaise: totalPaise,
+                        taxPaise: 0,
+                        totalAmountPaise: totalPaise,
+                        formattedTotalRupees: `₹${(totalPaise / 100).toFixed(0)}`,
+                        formattedSubtotalRupees: `₹${(totalPaise / 100).toFixed(0)}`,
+                      });
+                      const cleaned = (customerPhone || phoneInput || '').replace(/\D/g, '');
+                      const hasName = Boolean((customerName || nameInput || '').trim());
+                      if (cleaned.length !== 10 || !hasName) {
+                        setShowPhoneVerifyModal(true);
+                      } else {
+                        handlePayAndGeneratePin();
+                      }
+                    }}
+                    className={`h-11 px-5 sm:px-6 rounded-xl font-bold text-xs sm:text-sm tracking-wide flex items-center justify-center gap-2 group transition-all ${
+                      blankSheetCount > 0
+                        ? 'btn-primary-glow text-white cursor-pointer shadow-md shadow-blue-500/25'
+                        : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
                     }`}
                   >
-                    {preset} sheets
+                    <span>Proceed To Pay</span>
+                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                   </button>
-                ))}
+                </div>
               </div>
-
-              {/* Helper text */}
-              <p className="text-[11px] text-slate-400 text-left">
-                *Maximum 100 sheets per order
-              </p>
             </div>
           </div>
         )}
@@ -1983,7 +2114,12 @@ export default function QwikprintAuthenticApp() {
               {filesList.map((doc, idx) => (
                 <div
                   key={doc.id}
-                  className="rounded-3xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-sm hover:shadow-lg hover:border-[#2563eb]/40 transition-all duration-300 flex flex-col justify-between group"
+                  onClick={() => {
+                    sounds.keyPress();
+                    setSelectedDocId(doc.id);
+                    setCurrentStep('configure_settings');
+                  }}
+                  className="rounded-3xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-sm hover:shadow-lg hover:border-[#2563eb]/60 hover:ring-2 hover:ring-[#2563eb]/20 transition-all duration-300 flex flex-col justify-between group cursor-pointer"
                 >
                   <div>
                     {/* Card Header: Item Number, Type Badge & Delete Action */}
@@ -2071,7 +2207,7 @@ export default function QwikprintAuthenticApp() {
 
                     {/* Metadata Details */}
                     <div className="space-y-2 pt-1">
-                      <h3 className="font-extrabold text-sm text-slate-900 truncate" title={doc.name}>
+                      <h3 className="font-extrabold text-sm text-slate-900 truncate group-hover:text-[#2563eb] transition-colors" title={doc.name}>
                         {doc.name}
                       </h3>
                       
@@ -2082,9 +2218,9 @@ export default function QwikprintAuthenticApp() {
                           <span className="font-bold text-slate-800">{doc.pages} {doc.pages === 1 ? 'Page' : 'Pages'}</span>
                         </div>
 
-                        <span className="px-2 py-0.5 rounded-full bg-emerald-50 border border-blue-200 text-[#2563eb] text-[10px] font-bold flex items-center gap-1 whitespace-nowrap shrink-0">
-                          <CheckCircle2 className="h-3 w-3 stroke-[2.5]" />
-                          <span>Ready</span>
+                        <span className="px-2.5 py-1 rounded-full bg-blue-50 border border-blue-200 text-[#2563eb] text-[10px] font-bold flex items-center gap-1 whitespace-nowrap shrink-0 group-hover:bg-[#2563eb] group-hover:text-white transition-all shadow-2xs">
+                          <span>Configure</span>
+                          <ArrowRight className="h-3 w-3 stroke-[2.5] group-hover:translate-x-0.5 transition-transform" />
                         </span>
                       </div>
                     </div>
@@ -2581,17 +2717,21 @@ export default function QwikprintAuthenticApp() {
 
                     <button
                       type="button"
-                      onClick={() => {
-                        sounds.keyPress();
-                        setCurrentStep('review_order');
-                        if (!customerPhone) {
-                          setShowPhoneVerifyModal(true);
-                        }
-                      }}
-                      className="h-9 px-4 rounded-xl btn-primary-glow text-white font-bold text-xs tracking-wide flex items-center gap-1.5 cursor-pointer group"
+                      disabled={isProcessingPay}
+                      onClick={handleProceedClick}
+                      className="h-9 px-4 rounded-xl btn-primary-glow text-white font-bold text-xs tracking-wide flex items-center gap-1.5 cursor-pointer group disabled:opacity-50"
                     >
-                      <span>Proceed To Pay</span>
-                      <span className="text-xs group-hover:translate-x-1 transition-transform">&rarr;</span>
+                      {isProcessingPay ? (
+                        <>
+                          <RefreshCw className="h-3 w-3 animate-spin" />
+                          <span>Preparing Order...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Proceed To Pay</span>
+                          <span className="text-xs group-hover:translate-x-1 transition-transform">&rarr;</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
@@ -2838,7 +2978,7 @@ export default function QwikprintAuthenticApp() {
                   {/* Desktop Action Button */}
                   <button
                     type="button"
-                    onClick={handlePayAndGeneratePin}
+                    onClick={() => handlePayAndGeneratePin()}
                     disabled={isProcessingPay}
                     className="w-full h-12 rounded-2xl btn-primary-glow text-white font-bold text-sm tracking-wide flex items-center justify-center gap-2 cursor-pointer group disabled:opacity-50 shadow-md shadow-blue-500/25 transition-all"
                   >
@@ -3255,80 +3395,7 @@ export default function QwikprintAuthenticApp() {
         </div>
       )}
 
-      {/* ================= FIXED BOTTOM STICKY BAR: "Proceed To Pay" in blank_sheets (Screenshot 3) ================= */}
-      {currentStep === 'blank_sheets' && (
-        <div className="fixed bottom-0 inset-x-0 bg-white/95 border-t border-slate-200/90 px-6 py-4 shadow-[0_-10px_30px_rgba(0,0,0,0.06)] backdrop-blur-md z-40">
-          <div className="max-w-3xl mx-auto flex items-center justify-between">
-            <div>
-              <p className="text-xs text-slate-500 font-medium">
-                Total {blankSheetCount} {blankSheetCount === 1 ? 'sheet' : 'sheets'}
-              </p>
-              <div className="flex items-center gap-1.5 pt-0.5">
-                <p className="text-xl sm:text-2xl font-black text-slate-900 font-mono">
-                  ₹{(blankSheetCount * 2).toFixed(2)}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => alert('Price: ₹2.00 per blank sheet. Zero platform handling charges.')}
-                  className="text-slate-400 hover:text-slate-600 cursor-pointer"
-                  title="Price breakdown info"
-                >
-                  <Info className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
 
-            <button
-              type="button"
-              disabled={blankSheetCount === 0}
-              onClick={() => {
-                if (blankSheetCount <= 0) return;
-                sounds.keyPress();
-                const blankDoc: UploadedDocument = {
-                  id: `blank-a4-${Date.now()}`,
-                  name: `${blankSheetCount}x Blank A4 Sheets (80 GSM)`,
-                  sizeFormatted: `${blankSheetCount} Sheets`,
-                  pages: blankSheetCount,
-                  pageThumbnails: [],
-                  copies: 1,
-                  colorMode: 'bw',
-                  duplexMode: 'simplex',
-                  orientation: 'portrait',
-                  pageSelectionType: 'all',
-                  selectedPages: Array.from({ length: blankSheetCount }, (_, i) => i + 1),
-                  customRangeInput: `1-${blankSheetCount}`,
-                };
-                setFilesList([blankDoc]);
-                setSelectedDocId(blankDoc.id);
-                const totalPaise = blankSheetCount * 200;
-                setPriceQuote({
-                  pagesToPrintPerCopy: blankSheetCount,
-                  totalPrintPages: blankSheetCount,
-                  totalSheets: blankSheetCount,
-                  ratePerSheetPaise: 200,
-                  subtotalPaise: totalPaise,
-                  taxPaise: 0,
-                  totalAmountPaise: totalPaise,
-                  formattedTotalRupees: `₹${(totalPaise / 100).toFixed(0)}`,
-                  formattedSubtotalRupees: `₹${(totalPaise / 100).toFixed(0)}`,
-                });
-                setCurrentStep('review_order');
-                if (!customerPhone) {
-                  setShowPhoneVerifyModal(true);
-                }
-              }}
-              className={`h-13 px-8 rounded-2xl font-bold text-sm tracking-wide flex items-center justify-center gap-2 group transition-all ${
-                blankSheetCount > 0
-                  ? 'btn-primary-glow text-white cursor-pointer'
-                  : 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
-              }`}
-            >
-              <span>Proceed To Pay</span>
-              <span className="text-base group-hover:translate-x-1.5 transition-transform duration-200">&rarr;</span>
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* ================= FIXED BOTTOM STICKY BAR: "Proceed To Pay" in configure_settings ================= */}
       {currentStep === 'configure_settings' && (
@@ -3345,17 +3412,21 @@ export default function QwikprintAuthenticApp() {
 
             <button
               type="button"
-              onClick={() => {
-                sounds.keyPress();
-                setCurrentStep('review_order');
-                if (!customerPhone) {
-                  setShowPhoneVerifyModal(true);
-                }
-              }}
-              className="h-12 px-7 rounded-2xl btn-primary-glow text-white font-bold text-sm tracking-wide flex items-center justify-center gap-2 cursor-pointer group"
+              disabled={isProcessingPay}
+              onClick={handleProceedClick}
+              className="h-12 px-7 rounded-2xl btn-primary-glow text-white font-bold text-sm tracking-wide flex items-center justify-center gap-2 cursor-pointer group disabled:opacity-50"
             >
-              <span>Proceed To Pay</span>
-              <span className="text-base group-hover:translate-x-1.5 transition-transform duration-200">&rarr;</span>
+              {isProcessingPay ? (
+                <>
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  <span>Preparing Order...</span>
+                </>
+              ) : (
+                <>
+                  <span>Proceed To Pay</span>
+                  <span className="text-base group-hover:translate-x-1.5 transition-transform duration-200">&rarr;</span>
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -3377,64 +3448,142 @@ export default function QwikprintAuthenticApp() {
 
             <div className="text-center space-y-1.5 pt-2">
               <h2 className="text-xl sm:text-2xl font-bold text-slate-900">
-                Enter Student Details
+                Enter Your Details
               </h2>
               <p className="text-xs sm:text-sm text-slate-500 max-w-xs mx-auto">
                 Enter your name and mobile number to receive your pickup PIN on WhatsApp
               </p>
             </div>
 
-            <div className="space-y-3.5 pt-1">
+            <div className="space-y-4 pt-1">
               {/* Name Field */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                  <User className="h-3.5 w-3.5 text-blue-600" />
-                  <span>Student Full Name</span>
+              <div className="space-y-1.5 text-left">
+                <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <User className="h-3.5 w-3.5 text-[#2563eb]" />
+                    <span>Full Name</span>
+                  </span>
+                  <span className="text-[10px] text-red-500 font-semibold">*Required</span>
                 </label>
-                <div className="flex rounded-2xl border border-slate-200 bg-white shadow-2xs overflow-hidden focus-within:border-[#2563eb] focus-within:ring-2 focus-within:ring-[#2563eb]/20 transition-all">
+                <div className={`flex rounded-2xl border bg-white shadow-2xs overflow-hidden transition-all ${
+                  nameError 
+                    ? 'border-red-500 ring-2 ring-red-500/20' 
+                    : 'border-slate-200 focus-within:border-[#2563eb] focus-within:ring-2 focus-within:ring-[#2563eb]/20'
+                }`}>
                   <input
                     type="text"
-                    placeholder="Enter full name"
+                    placeholder="Enter full name (e.g. Arun Kumar)"
                     value={nameInput}
-                    onChange={(e) => setNameInput(e.target.value)}
+                    onChange={(e) => {
+                      setNameInput(e.target.value);
+                      if (nameError) setNameError('');
+                    }}
                     className="flex-1 px-4 py-3 text-sm font-semibold text-slate-900 placeholder-slate-400 focus:outline-none"
                   />
                 </div>
+                {nameError && (
+                  <p className="text-[11px] font-semibold text-red-600 flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3 shrink-0" />
+                    <span>{nameError}</span>
+                  </p>
+                )}
               </div>
 
               {/* Phone Field */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                  <Smartphone className="h-3.5 w-3.5 text-blue-600" />
-                  <span>WhatsApp Mobile Number</span>
+              <div className="space-y-1.5 text-left">
+                <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Smartphone className="h-3.5 w-3.5 text-[#2563eb]" />
+                    <span>WhatsApp Mobile Number</span>
+                  </span>
+                  <span className="text-[10px] text-red-500 font-semibold">*Required (10 digits)</span>
                 </label>
-                <div className="flex rounded-2xl border border-slate-200 bg-white shadow-2xs overflow-hidden focus-within:border-[#2563eb] focus-within:ring-2 focus-within:ring-[#2563eb]/20 transition-all">
+                <div className={`flex rounded-2xl border bg-white shadow-2xs overflow-hidden transition-all ${
+                  phoneError 
+                    ? 'border-red-500 ring-2 ring-red-500/20' 
+                    : 'border-slate-200 focus-within:border-[#2563eb] focus-within:ring-2 focus-within:ring-[#2563eb]/20'
+                }`}>
                   <div className="px-4 py-3 bg-slate-50 border-r border-slate-200 text-xs sm:text-sm font-bold text-slate-700 flex items-center select-none">
                     +91
                   </div>
                   <input
                     type="tel"
-                    placeholder="Enter mobile number"
+                    maxLength={10}
+                    placeholder="Enter 10-digit mobile number"
                     value={phoneInput}
-                    onChange={(e) => setPhoneInput(e.target.value)}
+                    onChange={(e) => {
+                      const digits = e.target.value.replace(/\D/g, '').slice(0, 10);
+                      setPhoneInput(digits);
+                      if (phoneError) setPhoneError('');
+                    }}
                     className="flex-1 px-4 py-3 text-sm font-semibold text-slate-900 placeholder-slate-400 focus:outline-none"
                   />
                 </div>
+                {phoneError && (
+                  <p className="text-[11px] font-semibold text-red-600 flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3 shrink-0" />
+                    <span>{phoneError}</span>
+                  </p>
+                )}
               </div>
             </div>
 
             <button
               type="button"
+              disabled={isProcessingPay}
               onClick={() => {
+                const cleanedPhone = phoneInput.replace(/\D/g, '');
+                const trimmedName = nameInput.trim();
+                let hasErr = false;
+
+                if (!trimmedName) {
+                  setNameError('Please enter your full name');
+                  hasErr = true;
+                }
+                if (cleanedPhone.length !== 10) {
+                  setPhoneError('Please enter a valid 10-digit mobile number');
+                  hasErr = true;
+                }
+                if (hasErr) {
+                  sounds.error();
+                  return;
+                }
+
                 sounds.keyPress();
-                setCustomerName(nameInput.trim());
-                setCustomerPhone(phoneInput.trim());
+                setCustomerName(trimmedName);
+                setCustomerPhone(cleanedPhone);
                 setShowPhoneVerifyModal(false);
+                handlePayAndGeneratePin({ phone: cleanedPhone, name: trimmedName });
               }}
-              className="w-full h-12 rounded-2xl bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-bold text-sm shadow-md shadow-blue-500/20 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
+              className="w-full h-12 rounded-2xl btn-primary-glow text-white font-bold text-sm shadow-md shadow-blue-500/20 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
-              Proceed
+              {isProcessingPay ? (
+                <>
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  <span>Preparing Order...</span>
+                </>
+              ) : (
+                <>
+                  <span>Confirm &amp; Proceed To Pay</span>
+                  <ArrowRight className="h-4 w-4" />
+                </>
+              )}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ================= ORDER CREATION PROCESSING OVERLAY ================= */}
+      {isProcessingPay && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm animate-fade-in text-slate-900">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-sm w-full text-center space-y-4 shadow-2xl border border-slate-100">
+            <div className="w-14 h-14 rounded-2xl bg-blue-50 text-[#2563eb] flex items-center justify-center mx-auto shadow-inner">
+              <RefreshCw className="w-7 h-7 animate-spin stroke-[2.5]" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="font-extrabold text-base sm:text-lg text-slate-900">Creating Your Secure Print Job</h3>
+              <p className="text-xs text-slate-500 font-medium">Encrypting documents and opening order summary...</p>
+            </div>
           </div>
         </div>
       )}
@@ -3893,7 +4042,11 @@ export default function QwikprintAuthenticApp() {
                   onClick={() => {
                     sounds.keyPress();
                     setIsProcessingModal(false);
-                    setCurrentStep('files_uploaded_list');
+                    if (filesList.length <= 1) {
+                      setCurrentStep('configure_settings');
+                    } else {
+                      setCurrentStep('files_uploaded_list');
+                    }
                   }}
                   className="w-full h-10 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer group"
                 >
@@ -3922,10 +4075,10 @@ export default function QwikprintAuthenticApp() {
               <div className="h-8 w-8 rounded-xl bg-[#2563eb]/10 text-[#2563eb] flex items-center justify-center">
                 <HelpCircle className="h-5 w-5" />
               </div>
-              <h3 className="text-lg font-bold text-slate-900">How SmartPrint Works</h3>
+              <h3 className="text-lg font-bold text-slate-900">How RIT SmartPrint Works</h3>
             </div>
             <p className="text-xs text-slate-500 mb-6">
-              Instant, contactless document printing in 3 easy steps:
+              Instant, contactless document printing designed for RIT students & faculty:
             </p>
 
             <div className="space-y-3.5 text-xs">
@@ -3934,8 +4087,8 @@ export default function QwikprintAuthenticApp() {
                   1
                 </span>
                 <div>
-                  <p className="font-bold text-slate-900">Upload & Configure</p>
-                  <p className="text-slate-500 mt-0.5">Select your PDF or document, choose B&W or Color, copies, and orientation.</p>
+                  <p className="font-bold text-slate-900">Upload Lab Records, Notes or Assignments</p>
+                  <p className="text-slate-500 mt-0.5">Select your PDF, lab manual or document, choose B&W or Color, copies, and Single/Both sides (Duplex).</p>
                 </div>
               </div>
 
@@ -3944,8 +4097,8 @@ export default function QwikprintAuthenticApp() {
                   2
                 </span>
                 <div>
-                  <p className="font-bold text-slate-900">Pay & Get 4-Digit PIN</p>
-                  <p className="text-slate-500 mt-0.5">Pay securely via UPI QR. You will instantly receive a unique 4-digit release PIN.</p>
+                  <p className="font-bold text-slate-900">Pay via UPI & Get 4-Digit PIN</p>
+                  <p className="text-slate-500 mt-0.5">Pay securely with GPay, PhonePe or Paytm. You will instantly receive a unique 4-digit release PIN on screen & WhatsApp.</p>
                 </div>
               </div>
 
@@ -3954,8 +4107,8 @@ export default function QwikprintAuthenticApp() {
                   3
                 </span>
                 <div>
-                  <p className="font-bold text-slate-900">Collect at SmartPrint Kiosk</p>
-                  <p className="text-slate-500 mt-0.5">Enter your 4-digit PIN on the kiosk screen at {currentMachine?.displayName || 'the kiosk'} to print instantly.</p>
+                  <p className="font-bold text-slate-900">Collect at Campus Kiosk</p>
+                  <p className="text-slate-500 mt-0.5">Enter your 4-digit PIN on the touchscreen at your selected Print ATM Kiosk to print in 30 seconds.</p>
                 </div>
               </div>
             </div>

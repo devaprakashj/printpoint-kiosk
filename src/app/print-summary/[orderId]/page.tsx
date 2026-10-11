@@ -28,11 +28,15 @@ import {
   QrCode,
   KeyRound,
   CheckCircle,
-  Timer
+  Timer,
+  Receipt,
+  X
 } from 'lucide-react';
 import Link from 'next/link';
 import Script from 'next/script';
 import QRCode from 'qrcode';
+import { jsPDF } from 'jspdf';
+import { toPng } from 'html-to-image';
 import Logo from '@/components/Logo';
 import { sounds } from '@/lib/sound';
 import confetti from 'canvas-confetti';
@@ -52,6 +56,39 @@ export default function PrintSummaryPage() {
   const [customerPhone, setCustomerPhone] = useState('');
   const [activeCodeTab, setActiveCodeTab] = useState<'qr' | 'pin'>('qr');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  const [showReceiptModal, setShowReceiptModal] = useState<boolean>(false);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState<boolean>(false);
+
+  // 5-Minute Payment Window Countdown State (300 Seconds)
+  const [timeLeft, setTimeLeft] = useState<number>(300);
+  const [isExpired, setIsExpired] = useState<boolean>(false);
+  const [showDocDetails, setShowDocDetails] = useState<boolean>(false);
+
+  // Active 1-second countdown timer based on order creation timestamp
+  useEffect(() => {
+    if (!order || order.paymentStatus === 'paid' || order.orderStatus === 'completed') return;
+
+    const computeTime = () => {
+      const createdMs = order.createdAt ? new Date(order.createdAt).getTime() : Date.now();
+      const expireMs = createdMs + 5 * 60 * 1000; // 5 minutes window
+      const remainingSecs = Math.max(0, Math.floor((expireMs - Date.now()) / 1000));
+      setTimeLeft(remainingSecs);
+
+      if (remainingSecs <= 0) {
+        setIsExpired(true);
+      }
+    };
+
+    computeTime();
+    const timer = setInterval(computeTime, 1000);
+    return () => clearInterval(timer);
+  }, [order?.createdAt, order?.paymentStatus, order?.orderStatus]);
+
+  const formatCountdown = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  };
 
   // Helper to persist paid state across polling and reload
   const markPaidLocally = (targetOrder: any) => {
@@ -183,12 +220,69 @@ export default function PrintSummaryPage() {
     setTimeout(() => setCopiedPin(false), 2500);
   };
 
-  // Handle Download Slip
-  const handleDownloadSlip = () => {
-    sounds.keyPress();
-    if (typeof window !== 'undefined') {
-      window.print();
+  // Handle Direct PDF Download
+  const handleDownloadPdf = async () => {
+    try {
+      sounds.keyPress();
+      setIsDownloadingPdf(true);
+
+      // If modal is not open yet, open it to ensure DOM element exists
+      if (!showReceiptModal) {
+        setShowReceiptModal(true);
+        await new Promise((r) => setTimeout(r, 250));
+      }
+
+      const element = document.getElementById('printable-receipt');
+      if (!element) throw new Error('Receipt element not found');
+
+      // Render crisp receipt image
+      const dataUrl = await toPng(element, {
+        quality: 1,
+        pixelRatio: 2,
+        cacheBust: true,
+        filter: (node) => {
+          // Exclude close button and bottom actions bar from PDF output
+          if (node instanceof HTMLElement && node.classList.contains('print:hidden')) {
+            return false;
+          }
+          return true;
+        },
+      });
+
+      const img = new Image();
+      img.src = dataUrl;
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+      });
+
+      // Standard receipt width: 300pt (~4.1 inches)
+      const pdfWidth = 300;
+      const pdfHeight = (img.height * pdfWidth) / img.width;
+
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'pt',
+        format: [pdfWidth, pdfHeight],
+      });
+
+      pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      const safeId = order?.orderNumber || order?.id || 'Receipt';
+      pdf.save(`SmartPrint_Receipt_${safeId}.pdf`);
+      sounds.success();
+    } catch (err) {
+      console.error('PDF export error:', err);
+      if (typeof window !== 'undefined') {
+        window.print();
+      }
+    } finally {
+      setIsDownloadingPdf(false);
     }
+  };
+
+  // Handle Download Slip / View
+  const handleDownloadSlip = () => {
+    handleDownloadPdf();
   };
 
   // Launch Razorpay Payment
@@ -300,42 +394,28 @@ export default function PrintSummaryPage() {
   const isPrinting = order?.orderStatus === 'printing';
 
   return (
-    <div className="min-h-screen lg:h-screen lg:overflow-hidden flex flex-col bg-[#f8fafc] font-sans text-slate-900 selection:bg-[#2563eb] selection:text-white relative bg-futuristic-grid">
+    <div className="min-h-screen lg:h-screen flex flex-col bg-[#f8fafc] font-sans text-slate-900 selection:bg-[#2563eb] selection:text-white relative bg-futuristic-grid">
       <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="lazyOnload" />
 
       {/* COMPACT TOP HEADER */}
-      <header className="h-14 px-4 sm:px-8 border-b border-slate-200/90 bg-white/95 backdrop-blur-md shrink-0 z-30 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <header className="h-12 sm:h-13 px-4 sm:px-8 border-b border-slate-200/90 bg-white/95 backdrop-blur-md shrink-0 z-30 flex items-center justify-between">
+        <div className="flex items-center gap-2.5 sm:gap-3">
           <Link
             href="/upload?new=true"
-            className="h-8 px-3 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center gap-1.5 text-xs font-bold text-slate-700 transition-colors"
+            className="h-8 w-8 sm:w-auto sm:px-3 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center sm:justify-start gap-1.5 text-xs font-bold text-slate-700 transition-colors shrink-0"
             title="Back to Upload"
           >
-            <ChevronLeft className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Upload Page</span>
+            <ChevronLeft className="w-4 h-4" />
+            <span className="hidden sm:inline">Upload</span>
           </Link>
-          <Logo size="md" />
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* Live Delivery Pulse */}
-          <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono font-bold border ${
-            isDelivered
-              ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
-              : isPrinting
-              ? 'bg-blue-50 text-blue-900 border-blue-300 animate-pulse'
-              : 'bg-blue-50 text-blue-900 border-blue-200/80'
-          }`}>
-            <span className={`w-2 h-2 rounded-full ${
-              isDelivered ? 'bg-emerald-600' : 'bg-blue-600 animate-pulse'
-            }`} />
-            <span>{order?.machineName || order?.machineCode || 'RIT-ATM-01'}</span>
+          <div className="shrink-0 flex items-center">
+            <Logo size="sm" />
           </div>
         </div>
       </header>
 
-      {/* MAIN CONTAINER: COMPACT SINGLE-VIEWPORT 2-COLUMN FRAME */}
-      <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4 flex flex-col justify-center overflow-y-auto lg:overflow-visible">
+      {/* MAIN CONTAINER: COMPACT FULL-FRAME VIEWPORT */}
+      <main className="flex-1 max-w-5xl w-full mx-auto px-3.5 sm:px-6 lg:px-8 py-2 sm:py-2.5 lg:py-2 flex flex-col lg:justify-center overflow-y-auto">
         {loading && (
           <div className="py-20 text-center space-y-3">
             <RefreshCw className="w-8 h-8 text-[#2563eb] animate-spin mx-auto" />
@@ -358,243 +438,336 @@ export default function PrintSummaryPage() {
         )}
 
         {!loading && !error && order && (
-          <div className="space-y-3 sm:space-y-3.5 animate-fade-in">
+          <div className="space-y-2 sm:space-y-2.5 animate-fade-in">
             {/* 1. Header Strip with Live Delivery Status */}
-            <div className="flex items-center justify-between border-b border-slate-200/80 pb-2.5">
-              <div className="flex items-center gap-3 flex-wrap">
-                <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-                  {isDelivered 
-                    ? 'Document Printed & Delivered! 🎉' 
-                    : isPrinting 
-                    ? 'Printing at Kiosk Now...' 
-                    : isPaid 
-                    ? 'Your Print Code is Ready!' 
-                    : 'Print Order Summary'}
-                </h1>
+            <div className="space-y-1 sm:space-y-0 sm:flex sm:items-center sm:justify-between border-b border-slate-200/80 pb-1.5 sm:pb-2">
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h1 className="text-base sm:text-xl font-black text-slate-900 tracking-tight">
+                    {isDelivered 
+                      ? 'Print Completed! 🎉' 
+                      : isPrinting 
+                      ? 'Printing at Kiosk Now...' 
+                      : isPaid 
+                      ? 'Print Code Ready!' 
+                      : isExpired
+                      ? 'Order Payment Expired'
+                      : 'Print Order Summary'}
+                  </h1>
 
-                {/* Status Badges */}
-                {isDelivered ? (
-                  <span className="px-3 py-1 rounded-full text-xs font-bold font-mono uppercase bg-emerald-100 text-emerald-900 border border-emerald-400 flex items-center gap-1.5 shadow-2xs">
-                    <CheckCircle className="w-3.5 h-3.5 text-emerald-700" />
-                    <span>DELIVERED &amp; COLLECTED</span>
-                  </span>
-                ) : isPrinting ? (
-                  <span className="px-3 py-1 rounded-full text-xs font-bold font-mono uppercase bg-blue-100 text-blue-900 border border-blue-400 flex items-center gap-1.5 animate-pulse">
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-700" />
-                    <span>PRINTING IN PROGRESS</span>
-                  </span>
-                ) : isPaid ? (
-                  <span className="px-3 py-1 rounded-full text-xs font-bold font-mono uppercase bg-amber-50 text-amber-900 border border-amber-300 flex items-center gap-1.5">
-                    <Timer className="w-3.5 h-3.5 text-amber-700" />
-                    <span>READY FOR KIOSK PICKUP</span>
-                  </span>
-                ) : (
-                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold font-mono uppercase bg-slate-100 text-slate-800 border border-slate-300">
-                    ● PAYMENT PENDING
-                  </span>
+                  {/* Status Badges */}
+                  {isDelivered ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold font-mono uppercase bg-emerald-100 text-emerald-900 border border-emerald-400 flex items-center gap-1 shadow-2xs">
+                      <CheckCircle className="w-3 h-3 text-emerald-700" />
+                      <span>COLLECTED</span>
+                    </span>
+                  ) : isPrinting ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold font-mono uppercase bg-blue-100 text-blue-900 border border-blue-400 flex items-center gap-1 animate-pulse">
+                      <RefreshCw className="w-3 h-3 animate-spin text-blue-700" />
+                      <span>PRINTING</span>
+                    </span>
+                  ) : isPaid ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold font-mono uppercase bg-amber-50 text-amber-900 border border-amber-300 flex items-center gap-1">
+                      <Timer className="w-3 h-3 text-amber-700" />
+                      <span>READY FOR PICKUP</span>
+                    </span>
+                  ) : isExpired ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold font-mono uppercase bg-rose-50 text-rose-800 border border-rose-300 flex items-center gap-1 shadow-2xs">
+                      <AlertTriangle className="w-3 h-3 text-rose-600" />
+                      <span>EXPIRED</span>
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold font-mono uppercase bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-ping" />
+                      <span>PAYMENT PENDING</span>
+                    </span>
+                  )}
+                </div>
+
+                {/* Subtitle / Expiry countdown for pending orders */}
+                {!isDelivered && !isPrinting && !isPaid && !isExpired && (
+                  <p className="text-xs font-medium text-slate-500 flex items-center gap-1.5 mt-0.5">
+                    <span>Order #{order.orderNumber || order.id}</span>
+                    <span>•</span>
+                    <span className={`inline-flex items-center gap-1 font-mono font-bold ${
+                      timeLeft < 60 ? 'text-rose-600 animate-pulse' : 'text-amber-700'
+                    }`}>
+                      <Timer className="w-3.5 h-3.5" />
+                      Expires in {formatCountdown(timeLeft)}
+                    </span>
+                  </p>
                 )}
               </div>
 
-              <div className="flex items-center gap-2">
-                <p className="text-xs text-slate-500 font-mono hidden sm:block">
+              <div className="hidden sm:flex items-center gap-2">
+                <p className="text-xs text-slate-500 font-mono">
                   Order ID: <strong className="text-slate-800">{order.orderNumber || order.id}</strong>
                 </p>
               </div>
             </div>
 
-            {/* 2. Desktop 2-Column Snug Frame */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 sm:gap-4 items-stretch">
+            {/* 2. Responsive 2-Column Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 sm:gap-3.5 items-stretch">
               
               {/* ================= LEFT COLUMN (6 COLS): DOCUMENT + SPECIFICATIONS + 3-STEP STATUS ================= */}
-              <div className="lg:col-span-6 flex flex-col justify-between space-y-3">
-                
-                {/* A. Unified Document & Student Card */}
-                <div className="rounded-2xl sm:rounded-3xl border border-slate-200/90 bg-white p-3.5 sm:p-4 shadow-sm space-y-3">
-                  {/* Top: File & Student Info Row */}
-                  <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#2563eb] flex items-center justify-center font-bold border border-blue-100 shrink-0">
-                        <FileText className="w-5 h-5" />
-                      </div>
-                      <div className="min-w-0">
-                        <h3 className="font-black text-sm sm:text-base text-slate-900 truncate">
-                          {order.fileName || 'Academic_Document.pdf'}
-                        </h3>
-                        <p className="text-[11px] font-semibold text-slate-600 font-mono">
-                          {order.fileSizeFormatted || '1.4 MB'} • {order.calculatedPrintPages || 1} Total Pages
-                        </p>
-                      </div>
-                    </div>
+              <div className={`lg:col-span-6 flex flex-col justify-between space-y-2 sm:space-y-2.5 ${
+                isPaid || isDelivered ? 'order-2 lg:order-1' : 'order-1'
+              }`}>
+                {/* Mobile Specs Toggle Button (When Paid) */}
+                {isPaid && (
+                  <div className="lg:hidden text-center py-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowDocDetails(!showDocDetails)}
+                      className="text-xs font-bold text-slate-500 hover:text-[#2563eb] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer"
+                    >
+                      <span>{showDocDetails ? '▲ Hide Document Details' : '▼ View Full Document & Customer Details'}</span>
+                    </button>
+                  </div>
+                )}
 
-                    {/* Compact Student Tag */}
-                    <div className="flex items-center gap-2 bg-slate-50 border border-slate-200/80 px-2.5 py-1 rounded-xl shrink-0">
-                      <div className="w-6 h-6 rounded-lg bg-blue-100 text-[#2563eb] flex items-center justify-center font-bold">
-                        <User className="h-3.5 w-3.5" />
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xs font-black text-slate-900 truncate max-w-[100px] sm:max-w-[130px]">
-                          {order.customerName || 'Student'}
-                        </p>
-                        <p className="text-[10px] font-mono font-bold text-slate-600">
-                          {customerPhone || order.customerPhone ? `+91 ${customerPhone || order.customerPhone}` : 'No phone'}
-                        </p>
-                      </div>
+                {/* A. Unified Document & Specifications Card */}
+                <div className={`${isPaid && !showDocDetails ? 'hidden lg:block' : 'block'} rounded-2xl border border-slate-200/90 bg-white p-2.5 sm:p-3 shadow-xs space-y-2`}>
+                  {/* Top: File Info Row */}
+                  <div className="flex items-center gap-2.5 border-b border-slate-100 pb-2">
+                    <div className="w-8 h-8 rounded-lg bg-blue-50 text-[#2563eb] flex items-center justify-center font-bold border border-blue-100 shrink-0">
+                      <FileText className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="font-black text-xs sm:text-sm text-slate-900 truncate" title={order.fileName}>
+                        {order.fileName || 'Academic_Document.pdf'}
+                      </h3>
+                      <p className="text-[10px] font-semibold text-slate-500 font-mono">
+                        {order.fileSizeFormatted || '1.4 MB'} • {order.calculatedPrintPages || 1} Total Pages
+                      </p>
                     </div>
                   </div>
 
                   {/* Specification 4-Pill Grid */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    <div className="p-2 sm:p-2.5 rounded-xl bg-slate-50 border border-slate-200/70 space-y-0.5">
-                      <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wide block">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                    <div className="p-1.5 sm:p-2 rounded-xl bg-slate-50 border border-slate-200/70 space-y-0.5">
+                      <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wide block">
                         Color Mode
                       </span>
-                      <p className="font-black text-xs sm:text-sm text-slate-900 truncate">
+                      <p className="font-black text-xs text-slate-900 truncate">
                         {order.colorMode === 'color' ? '🎨 Color' : '⬛ B & W'}
                       </p>
                     </div>
 
-                    <div className="p-2 sm:p-2.5 rounded-xl bg-slate-50 border border-slate-200/70 space-y-0.5">
-                      <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wide block">
+                    <div className="p-1.5 sm:p-2 rounded-xl bg-slate-50 border border-slate-200/70 space-y-0.5">
+                      <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wide block">
                         Sides
                       </span>
-                      <p className="font-black text-xs sm:text-sm text-slate-900 truncate">
+                      <p className="font-black text-xs text-slate-900 truncate">
                         {order.duplexMode === 'duplex' ? '2-Sided' : '1-Sided'}
                       </p>
                     </div>
 
-                    <div className="p-2 sm:p-2.5 rounded-xl bg-slate-50 border border-slate-200/70 space-y-0.5">
-                      <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wide block">
+                    <div className="p-1.5 sm:p-2 rounded-xl bg-slate-50 border border-slate-200/70 space-y-0.5">
+                      <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wide block">
                         Copies
                       </span>
-                      <p className="font-black text-xs sm:text-sm text-slate-900 truncate">
+                      <p className="font-black text-xs text-slate-900 truncate">
                         {order.copies || 1} {(order.copies || 1) === 1 ? 'Copy' : 'Copies'}
                       </p>
                     </div>
 
-                    <div className="p-2 sm:p-2.5 rounded-xl bg-blue-50/80 border border-blue-200/80 space-y-0.5">
-                      <span className="text-[10px] font-bold text-blue-800 uppercase tracking-wide block">
+                    <div className="p-1.5 sm:p-2 rounded-xl bg-blue-50/70 border border-blue-200/70 space-y-0.5">
+                      <span className="text-[9px] font-bold text-blue-800 uppercase tracking-wide block">
                         Total Sheets
                       </span>
-                      <p className="font-black text-xs sm:text-sm text-[#2563eb] font-mono truncate">
+                      <p className="font-black text-xs text-[#2563eb] font-mono whitespace-nowrap">
                         {order.calculatedSheets || 1} A4 Sheets
                       </p>
                     </div>
                   </div>
                 </div>
 
-                {/* B. Live 3-Stage Order Fulfillment Tracker */}
-                <div className="rounded-2xl sm:rounded-3xl border border-slate-200/90 bg-white p-3 sm:p-3.5 shadow-sm space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-                      <span>Order Fulfillment Status</span>
-                    </h3>
-                    <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold font-mono border ${
-                      isDelivered 
-                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300' 
-                        : isPaid 
-                        ? 'bg-amber-50 text-amber-800 border-amber-300' 
-                        : 'bg-slate-100 text-slate-600 border-slate-200'
-                    }`}>
-                      {isDelivered ? '✓ 100% Completed' : isPaid ? 'Awaiting Kiosk Pickup' : 'Payment Required'}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2">
-                    {/* Stage 1: Payment */}
-                    <div className={`p-2 rounded-xl border flex items-center gap-2 transition-all ${
-                      isPaid ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950' : 'bg-slate-50 border-slate-200 text-slate-600'
-                    }`}>
-                      <div className={`w-5 h-5 rounded-md flex items-center justify-center font-black text-[10px] shrink-0 ${
-                        isPaid ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-700'
-                      }`}>
-                        {isPaid ? '✓' : '1'}
+                {/* B. Dedicated Contact & Pickup User Card */}
+                <div className={`${isPaid && !showDocDetails ? 'hidden lg:block' : 'block'} rounded-2xl border border-slate-200/90 bg-white p-2 sm:p-2.5 shadow-xs`}>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
+                    {/* User Name */}
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-7 h-7 rounded-lg bg-blue-50 text-[#2563eb] flex items-center justify-center font-bold border border-blue-100 shrink-0">
+                        <User className="w-3.5 h-3.5" />
                       </div>
-                      <div className="min-w-0">
-                        <p className="font-black text-xs truncate">Payment</p>
-                        <p className="text-[10px] font-semibold text-emerald-700 truncate">{isPaid ? 'Verified' : 'Pending'}</p>
-                      </div>
-                    </div>
-
-                    {/* Stage 2: Kiosk Verification */}
-                    <div className={`p-2 rounded-xl border flex items-center gap-2 transition-all ${
-                      isDelivered 
-                        ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950' 
-                        : isPrinting 
-                        ? 'bg-blue-50 border-blue-300 text-blue-950 animate-pulse' 
-                        : isPaid 
-                        ? 'bg-amber-50/80 border-amber-300 text-amber-950' 
-                        : 'bg-slate-50 border-slate-200 text-slate-500'
-                    }`}>
-                      <div className={`w-5 h-5 rounded-md flex items-center justify-center font-black text-[10px] shrink-0 ${
-                        isDelivered 
-                          ? 'bg-emerald-600 text-white' 
-                          : isPrinting 
-                          ? 'bg-blue-600 text-white' 
-                          : isPaid 
-                          ? 'bg-amber-600 text-white' 
-                          : 'bg-slate-300 text-slate-700'
-                      }`}>
-                        {isDelivered ? '✓' : isPrinting ? '⚡' : '2'}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-black text-xs truncate">QR / PIN Scan</p>
-                        <p className={`text-[10px] font-semibold truncate ${
-                          isDelivered ? 'text-emerald-700' : isPrinting ? 'text-blue-700' : isPaid ? 'text-amber-800' : 'text-slate-500'
-                        }`}>
-                          {isDelivered ? 'Verified' : isPrinting ? 'Printing...' : isPaid ? 'Pending Scan' : 'Waiting'}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                          Contact Name
                         </p>
+                        <h4 className="font-extrabold text-xs sm:text-sm text-slate-900 break-words leading-tight">
+                          {order.customerName || order.customerEmail || 'Customer'}
+                        </h4>
                       </div>
                     </div>
 
-                    {/* Stage 3: Paper Delivery */}
-                    <div className={`p-2 rounded-xl border flex items-center gap-2 transition-all ${
-                      isDelivered ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950' : 'bg-slate-50 border-slate-200 text-slate-500'
-                    }`}>
-                      <div className={`w-5 h-5 rounded-md flex items-center justify-center font-black text-[10px] shrink-0 ${
-                        isDelivered ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-700'
-                      }`}>
-                        {isDelivered ? '✓' : '3'}
+                    {/* Mobile Number */}
+                    <div className="flex items-center gap-2 sm:justify-end border-t sm:border-t-0 border-slate-100 pt-1.5 sm:pt-0">
+                      <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold border border-emerald-100 shrink-0">
+                        <Phone className="w-3.5 h-3.5" />
                       </div>
                       <div className="min-w-0">
-                        <p className="font-black text-xs truncate">Delivery</p>
-                        <p className={`text-[10px] font-semibold truncate ${isDelivered ? 'text-emerald-700' : 'text-slate-500'}`}>
-                          {isDelivered ? 'Collected' : 'In Queue'}
+                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider sm:text-right">
+                          WhatsApp Mobile
+                        </p>
+                        <p className="font-mono font-bold text-xs text-slate-900 leading-tight">
+                          {order.customerPhone ? (() => {
+                            const clean = String(order.customerPhone).replace(/\D/g, '');
+                            return clean.length === 10 ? `+91 ${clean.slice(0, 5)} ${clean.slice(5)}` : `+91 ${clean}`;
+                          })() : 'No phone'}
                         </p>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Micro Security & Cloud Shred Status */}
-                <div className={`px-3 py-1.5 rounded-xl border flex items-center gap-2 text-xs transition-colors ${
-                  isDelivered 
-                    ? 'bg-emerald-50/80 border-emerald-300 text-emerald-950' 
-                    : 'bg-blue-50/70 border-blue-200/70 text-slate-700'
-                }`}>
-                  <ShieldCheck className={`w-3.5 h-3.5 shrink-0 ${isDelivered ? 'text-emerald-600' : 'text-[#2563eb]'}`} />
-                  <p className="text-[11px] font-semibold truncate">
+                {/* C. Real Connected Campus Kiosk Pipeline Tracker */}
+                <div className="rounded-2xl border border-slate-200/90 bg-white p-2.5 sm:p-3 shadow-xs space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-800">
+                      Live Order Progress
+                    </span>
+
+                    {/* Active Status Pill */}
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200/70 text-[11px] font-bold font-mono text-slate-700">
+                      <span className={`w-1.5 h-1.5 rounded-full ${
+                        isDelivered 
+                          ? 'bg-emerald-500' 
+                          : isPrinting 
+                          ? 'bg-blue-600 animate-ping' 
+                          : isPaid 
+                          ? 'bg-blue-600 animate-pulse' 
+                          : isExpired 
+                          ? 'bg-rose-500' 
+                          : 'bg-amber-500 animate-pulse'
+                      }`} />
+                      <span>
+                        {isDelivered 
+                          ? 'Completed' 
+                          : isPrinting 
+                          ? 'Printing Now' 
+                          : isPaid 
+                          ? 'Ready for Scan' 
+                          : isExpired 
+                          ? 'Session Expired' 
+                          : 'Payment Pending'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Connected Stepper Timeline */}
+                  <div className="relative pt-1 pb-0.5">
+                    {/* Background Connecting Track Line */}
+                    <div className="absolute top-[18px] left-8 right-8 h-1 bg-slate-100 rounded-full z-0" />
+                    
+                    {/* Active Gradient Fill Progress Line */}
+                    <div 
+                      className="absolute top-[18px] left-8 h-1 bg-gradient-to-r from-emerald-500 to-[#2563eb] rounded-full transition-all duration-500 z-0" 
+                      style={{
+                        width: isDelivered 
+                          ? 'calc(100% - 64px)' 
+                          : isPrinting 
+                          ? 'calc(75% - 48px)' 
+                          : isPaid 
+                          ? 'calc(50% - 32px)' 
+                          : '0%'
+                      }}
+                    />
+
+                    {/* 3 Step Milestone Nodes */}
+                    <div className="relative z-10 grid grid-cols-3 text-center">
+                      {/* Step 1: Payment */}
+                      <div className="flex flex-col items-center">
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[10px] transition-all shadow-2xs ${
+                          isPaid || isDelivered 
+                            ? 'bg-emerald-500 text-white ring-3 ring-emerald-50' 
+                            : isExpired 
+                            ? 'bg-rose-500 text-white ring-3 ring-rose-50' 
+                            : 'bg-blue-600 text-white ring-3 ring-blue-50'
+                        }`}>
+                          {isPaid || isDelivered ? <Check className="w-3 h-3 stroke-[3]" /> : isExpired ? '✕' : '1'}
+                        </div>
+                        <p className="mt-1 text-[11px] font-extrabold text-slate-900 leading-none">Payment</p>
+                        <p className={`mt-0.5 text-[9px] font-semibold ${
+                          isPaid || isDelivered ? 'text-emerald-700' : isExpired ? 'text-rose-600' : 'text-blue-700'
+                        }`}>
+                          {isPaid || isDelivered ? 'Verified ✓' : isExpired ? 'Timed Out' : 'Pending'}
+                        </p>
+                      </div>
+
+                      {/* Step 2: Kiosk Scan */}
+                      <div className="flex flex-col items-center">
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[10px] transition-all shadow-2xs ${
+                          isDelivered 
+                            ? 'bg-emerald-500 text-white ring-3 ring-emerald-50' 
+                            : isPrinting 
+                            ? 'bg-blue-600 text-white ring-3 ring-blue-100 animate-pulse' 
+                            : isPaid 
+                            ? 'bg-[#2563eb] text-white ring-3 ring-blue-100' 
+                            : 'bg-white border-2 border-slate-200 text-slate-400'
+                        }`}>
+                          {isDelivered ? <Check className="w-3 h-3 stroke-[3]" /> : isPrinting ? '⚡' : isPaid ? <QrCode className="w-3 h-3" /> : '2'}
+                        </div>
+                        <p className="mt-1 text-[11px] font-extrabold text-slate-900 leading-none">Kiosk Scan</p>
+                        <p className={`mt-0.5 text-[9px] font-semibold ${
+                          isDelivered ? 'text-emerald-700' : isPrinting ? 'text-blue-700' : isPaid ? 'text-[#2563eb]' : 'text-slate-400'
+                        }`}>
+                          {isDelivered ? 'Scanned ✓' : isPrinting ? 'In Progress' : isPaid ? 'Ready to Scan' : 'Waiting'}
+                        </p>
+                      </div>
+
+                      {/* Step 3: Print Delivery */}
+                      <div className="flex flex-col items-center">
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[10px] transition-all shadow-2xs ${
+                          isDelivered 
+                            ? 'bg-emerald-500 text-white ring-3 ring-emerald-50' 
+                            : isPrinting 
+                            ? 'bg-blue-50 border-2 border-blue-400 text-blue-700 animate-pulse' 
+                            : 'bg-white border-2 border-slate-200 text-slate-400'
+                        }`}>
+                          {isDelivered ? <Check className="w-3 h-3 stroke-[3]" /> : isPrinting ? '🖨️' : '3'}
+                        </div>
+                        <p className="mt-1 text-[11px] font-extrabold text-slate-900 leading-none">Print Pickup</p>
+                        <p className={`mt-0.5 text-[9px] font-semibold ${
+                          isDelivered ? 'text-emerald-700' : isPrinting ? 'text-blue-700' : 'text-slate-400'
+                        }`}>
+                          {isDelivered ? 'Collected 🎉' : isPrinting ? 'Printing' : 'In Queue'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Minimalist Trust & Privacy Note */}
+                <div className="flex items-center justify-center gap-1.5 py-0.5 text-[10px] text-slate-500 text-center">
+                  <ShieldCheck className={`w-3.5 h-3.5 shrink-0 ${isDelivered ? 'text-emerald-600' : isExpired ? 'text-rose-500' : 'text-[#2563eb]'}`} />
+                  <span className="font-medium whitespace-nowrap">
                     {isDelivered 
-                      ? '✓ File printed successfully & permanently shredded from server (0-Retention)'
-                      : 'AES-256 encrypted • Auto-shredded immediately after printing at kiosk'}
-                  </p>
+                      ? 'Document collected • Auto-shredded from cloud'
+                      : isExpired
+                      ? 'Unpaid document auto-shredded from cloud'
+                      : 'AES-256 Encrypted • Auto-shreds after printing'}
+                  </span>
                 </div>
               </div>
 
               {/* ================= RIGHT COLUMN (6 COLS): DUAL-OPTION (QR CODE & PIN) OR DELIVERED SUCCESS STATE ================= */}
-              <div className="lg:col-span-6 flex flex-col justify-between space-y-3">
+              <div className={`lg:col-span-6 flex flex-col justify-between space-y-2 sm:space-y-2.5 ${
+                isPaid || isDelivered ? 'order-1 lg:order-2' : 'order-2'
+              }`}>
                 
                 {/* STATE A: DELIVERED & COLLECTED SUCCESS CARD */}
                 {isDelivered ? (
-                  <div className="rounded-2xl sm:rounded-3xl border-2 border-emerald-300 bg-gradient-to-b from-white via-emerald-50/30 to-emerald-50/70 p-5 text-slate-900 shadow-md space-y-4 flex-1 flex flex-col justify-between text-center animate-fade-in">
-                    <div className="space-y-3 pt-2">
+                  <div className="rounded-2xl border-2 border-emerald-300 bg-gradient-to-b from-white via-emerald-50/30 to-emerald-50/70 p-4 sm:p-5 text-slate-900 shadow-xs space-y-3 flex-1 flex flex-col justify-between text-center animate-fade-in">
+                    <div className="space-y-2.5 pt-1">
                       <div className="relative inline-flex items-center justify-center">
-                        <div className="w-16 h-16 rounded-2xl bg-emerald-500 text-white flex items-center justify-center shadow-lg shadow-emerald-500/30 mx-auto">
-                          <CheckCircle2 className="w-10 h-10 stroke-[2.5]" />
+                        <div className="w-14 h-14 rounded-2xl bg-emerald-500 text-white flex items-center justify-center shadow-md shadow-emerald-500/30 mx-auto">
+                          <CheckCircle2 className="w-8 h-8 stroke-[2.5]" />
                         </div>
                       </div>
 
-                      <div className="space-y-1">
-                        <h2 className="text-xl sm:text-2xl font-black text-slate-900">
+                      <div className="space-y-0.5">
+                        <h2 className="text-lg sm:text-xl font-black text-slate-900">
                           Print Job Completed!
                         </h2>
                         <p className="text-xs font-semibold text-emerald-800 max-w-sm mx-auto">
@@ -603,16 +776,16 @@ export default function PrintSummaryPage() {
                       </div>
 
                       {/* Delivery Verification Pill */}
-                      <div className="p-3 rounded-2xl bg-white border border-emerald-200 text-left space-y-1.5 shadow-2xs">
-                        <div className="flex justify-between text-xs">
+                      <div className="p-2.5 rounded-xl bg-white border border-emerald-200 text-left space-y-1 text-xs shadow-2xs">
+                        <div className="flex justify-between">
                           <span className="font-semibold text-slate-600">Dispense Status:</span>
                           <span className="font-black text-emerald-700">Dispensed Into Output Tray</span>
                         </div>
-                        <div className="flex justify-between text-xs">
+                        <div className="flex justify-between">
                           <span className="font-semibold text-slate-600">Total Sheets:</span>
                           <span className="font-bold text-slate-900 font-mono">{order.calculatedSheets || 1} A4 Sheets</span>
                         </div>
-                        <div className="flex justify-between text-xs">
+                        <div className="flex justify-between">
                           <span className="font-semibold text-slate-600">Security Wipe:</span>
                           <span className="font-bold text-blue-700">AES-256 Vault Zero-Wiped</span>
                         </div>
@@ -623,16 +796,19 @@ export default function PrintSummaryPage() {
                     <div className="grid grid-cols-2 gap-2 pt-1 border-t border-emerald-200/80">
                       <button
                         type="button"
-                        onClick={handleDownloadSlip}
-                        className="py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        onClick={() => {
+                          sounds.keyPress();
+                          setShowReceiptModal(true);
+                        }}
+                        className="py-2 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                       >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Download Slip</span>
+                        <Receipt className="w-3.5 h-3.5 text-blue-400" />
+                        <span>View Receipt</span>
                       </button>
 
                       <Link
                         href="/upload?new=true"
-                        className="py-2.5 px-3 rounded-xl btn-primary-glow text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        className="py-2 px-3 rounded-xl btn-primary-glow text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                       >
                         <FileText className="w-3.5 h-3.5" />
                         <span>Print Another</span>
@@ -640,134 +816,227 @@ export default function PrintSummaryPage() {
                     </div>
                   </div>
                 ) : isPaid ? (
-                  /* STATE B: PAID & AWAITING KIOSK PICKUP (QR / PIN TOGGLE) */
-                  <div className="rounded-2xl sm:rounded-3xl border border-slate-200/90 bg-white p-4 sm:p-5 text-slate-900 shadow-sm space-y-3 flex-1 flex flex-col justify-between">
-                    {/* Header + Option Toggle Buttons */}
-                    <div>
-                      <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                        <div>
-                          <p className="text-xs sm:text-sm font-black text-slate-900 flex items-center gap-1.5">
-                            <span>Collect Prints at Kiosk</span>
-                            <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
-                          </p>
-                          <p className="text-[11px] text-slate-500 font-medium">
-                            Scan QR code or type 4-digit PIN at the kiosk
-                          </p>
-                        </div>
+                  /* STATE B: PAID & AWAITING KIOSK PICKUP (PREMIUM PASS UI) */
+                  <div className="rounded-2xl border border-slate-200/90 bg-white p-3 sm:p-3.5 text-slate-900 shadow-xs space-y-2.5 flex-1 flex flex-col justify-between">
+                    <div className="space-y-2">
+                      {/* 1. Top Full-Width Segmented Tab Control with Fluid Sliding Indicator */}
+                      <div className="relative p-0.5 rounded-xl bg-slate-100/90 border border-slate-200/80 flex items-center">
+                        {/* Animated sliding background pill */}
+                        <div
+                          className={`absolute top-0.5 bottom-0.5 w-[calc(50%-2px)] rounded-lg bg-white shadow-2xs border border-slate-200/70 transition-all duration-300 ease-out pointer-events-none ${
+                            activeCodeTab === 'qr' ? 'left-0.5' : 'left-[calc(50%+1px)]'
+                          }`}
+                        />
 
-                        {/* Dual Option Toggle Tabs */}
-                        <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              sounds.keyPress();
-                              setActiveCodeTab('qr');
-                            }}
-                            className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                              activeCodeTab === 'qr'
-                                ? 'bg-white text-[#2563eb] shadow-xs border border-slate-200/60'
-                                : 'text-slate-600 hover:text-slate-900'
-                            }`}
-                          >
-                            <QrCode className="w-3.5 h-3.5" />
-                            <span>QR Code</span>
-                          </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            sounds.keyPress();
+                            setActiveCodeTab('qr');
+                          }}
+                          className={`relative z-10 flex-1 py-1.5 px-3 text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer select-none ${
+                            activeCodeTab === 'qr' ? 'text-slate-900' : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          <QrCode className="w-3.5 h-3.5 text-[#2563eb]" />
+                          <span className="whitespace-nowrap">QR Code</span>
+                        </button>
 
-                          <button
-                            type="button"
-                            onClick={() => {
-                              sounds.keyPress();
-                              setActiveCodeTab('pin');
-                            }}
-                            className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                              activeCodeTab === 'pin'
-                                ? 'bg-white text-[#2563eb] shadow-xs border border-slate-200/60'
-                                : 'text-slate-600 hover:text-slate-900'
-                            }`}
-                          >
-                            <KeyRound className="w-3.5 h-3.5" />
-                            <span>PIN</span>
-                          </button>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            sounds.keyPress();
+                            setActiveCodeTab('pin');
+                          }}
+                          className={`relative z-10 flex-1 py-1.5 px-3 text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer select-none ${
+                            activeCodeTab === 'pin' ? 'text-slate-900' : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          <KeyRound className="w-3.5 h-3.5 text-[#2563eb]" />
+                          <span className="whitespace-nowrap">4-Digit PIN</span>
+                        </button>
                       </div>
 
-                      {/* Display Area: QR CODE TAB */}
+                      {/* 2. Clean Document Context Strip (Shown on Mobile, hidden on Desktop since Left Column already displays it) */}
+                      <div className="lg:hidden flex items-center justify-between px-3 py-1.5 rounded-xl bg-slate-50/80 border border-slate-200/70">
+                        <div className="min-w-0 flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-md bg-blue-100/70 text-[#2563eb] flex items-center justify-center shrink-0">
+                            <FileText className="w-3.5 h-3.5" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-extrabold text-xs text-slate-900 truncate" title={order.fileName}>
+                              {order.fileName || 'Academic_Document.pdf'}
+                            </p>
+                            <p className="text-[10px] font-bold text-slate-500 font-mono">
+                              {order.calculatedSheets || 1} {((order.calculatedSheets || 1) === 1) ? 'A4 Sheet' : 'A4 Sheets'} • {order.colorMode === 'color' ? 'Color' : 'B&W'} • {order.duplexMode === 'duplex' ? '2-Sided' : '1-Sided'}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-mono font-bold text-emerald-800 bg-emerald-100/80 border border-emerald-300/80 px-2 py-0.5 rounded-full shrink-0">
+                          Paid ✓
+                        </span>
+                      </div>
+
+                      {/* 3. Display Area: QR CODE VIEW */}
                       {activeCodeTab === 'qr' && (
-                        <div className="py-2.5 flex flex-col items-center justify-center text-center space-y-2 animate-fade-in">
-                          <div className="relative p-2.5 rounded-2xl bg-white border-2 border-slate-200 shadow-sm flex items-center justify-center">
+                        <div className="py-0.5 flex flex-col items-center justify-center text-center space-y-1.5 animate-fade-in">
+                          {/* Modern Scanner Viewfinder Frame */}
+                          <div className="relative p-2.5 lg:p-2 rounded-2xl bg-white border border-slate-200 shadow-2xs flex items-center justify-center">
+                            {/* Viewfinder Corners */}
+                            <div className="absolute top-1.5 left-1.5 w-3.5 h-3.5 border-t-2 border-l-2 border-[#2563eb] rounded-tl pointer-events-none" />
+                            <div className="absolute top-1.5 right-1.5 w-3.5 h-3.5 border-t-2 border-r-2 border-[#2563eb] rounded-tr pointer-events-none" />
+                            <div className="absolute bottom-1.5 left-1.5 w-3.5 h-3.5 border-b-2 border-l-2 border-[#2563eb] rounded-bl pointer-events-none" />
+                            <div className="absolute bottom-1.5 right-1.5 w-3.5 h-3.5 border-b-2 border-r-2 border-[#2563eb] rounded-br pointer-events-none" />
+
                             {qrDataUrl ? (
                               <img
                                 src={qrDataUrl}
                                 alt="Print QR Code"
-                                className="w-40 h-40 sm:w-44 sm:h-44 object-contain rounded-lg"
+                                className="w-36 h-36 sm:w-40 sm:h-40 lg:w-28 lg:h-28 xl:w-32 xl:h-32 object-contain rounded-md"
                               />
                             ) : (
-                              <div className="w-40 h-40 flex items-center justify-center">
-                                <RefreshCw className="w-6 h-6 animate-spin text-[#2563eb]" />
+                              <div className="w-28 h-28 flex items-center justify-center">
+                                <RefreshCw className="w-5 h-5 animate-spin text-[#2563eb]" />
                               </div>
                             )}
                           </div>
-                          <p className="text-xs font-semibold text-slate-600">
-                            Hold this QR Code in front of the kiosk scanner to release prints instantly.
-                          </p>
+
+                          <div className="space-y-1">
+                            <p className="text-[11px] font-bold text-slate-800 flex items-center justify-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                              <span>Hold code to kiosk scanner window</span>
+                            </p>
+                            
+                            {/* Instant PIN fallback shortcut */}
+                            {order.fourDigitPin && (
+                              <button
+                                type="button"
+                                onClick={handleCopyPin}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-100 hover:bg-slate-200/80 text-[10px] font-bold text-slate-700 transition-colors cursor-pointer"
+                              >
+                                <span>Or enter PIN:</span>
+                                <span className="font-mono font-black text-[#2563eb] tracking-widest">{order.fourDigitPin}</span>
+                                {copiedPin ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3 text-slate-400" />}
+                              </button>
+                            )}
+                          </div>
                         </div>
                       )}
 
-                      {/* Display Area: 4-DIGIT PIN TAB */}
+                      {/* 4. Display Area: 4-DIGIT PIN VIEW */}
                       {activeCodeTab === 'pin' && (
-                        <div className="py-4 flex flex-col items-center justify-center text-center space-y-3 animate-fade-in">
-                          <div className="rounded-2xl border-2 border-blue-200 bg-blue-50/70 p-4 sm:p-5 w-full max-w-xs mx-auto text-center space-y-2">
-                            <span className="text-[10px] font-mono font-bold text-blue-900 uppercase tracking-widest block">
-                              4-Digit Kiosk OTP / PIN
+                        <div className="py-1 flex flex-col items-center justify-center text-center space-y-2 animate-fade-in">
+                          <div className="rounded-2xl border border-blue-200/90 bg-gradient-to-b from-blue-50/50 to-blue-50/90 p-3 sm:p-4 w-full max-w-xs mx-auto text-center space-y-2 shadow-2xs">
+                            <span className="text-[9px] font-mono font-bold text-blue-900 uppercase tracking-widest block">
+                              Touchscreen Kiosk Passcode
                             </span>
-                            <div className="flex items-center justify-center gap-2.5">
-                              {order.fourDigitPin.split('').map((digit: string, i: number) => (
+                            <div className="flex items-center justify-center gap-2">
+                              {order.fourDigitPin ? order.fourDigitPin.split('').map((digit: string, i: number) => (
                                 <div
                                   key={i}
-                                  className="w-12 h-14 rounded-xl bg-white border-2 border-blue-400 text-3xl font-black font-mono text-[#2563eb] flex items-center justify-center shadow-xs"
+                                  className="w-10 h-12 rounded-xl bg-white border border-blue-300 text-2xl font-black font-mono text-[#2563eb] flex items-center justify-center shadow-xs"
                                 >
                                   {digit}
                                 </div>
-                              ))}
+                              )) : (
+                                <span className="text-xs font-bold text-slate-400">PIN Generating...</span>
+                              )}
                             </div>
                             <button
                               type="button"
                               onClick={handleCopyPin}
-                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-blue-300 text-[11px] font-bold text-blue-900 hover:bg-blue-100 transition-colors cursor-pointer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-blue-200 text-[11px] font-bold text-blue-900 hover:bg-blue-100/60 shadow-2xs transition-all cursor-pointer active:scale-95"
                             >
-                              {copiedPin ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                              <span>{copiedPin ? 'PIN Copied!' : 'Tap to Copy PIN'}</span>
+                              {copiedPin ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3 text-blue-600" />}
+                              <span>{copiedPin ? 'PIN Copied to Clipboard!' : 'Tap to Copy PIN'}</span>
                             </button>
                           </div>
-                          <p className="text-xs font-semibold text-slate-600">
-                            Type this 4-digit code directly on the kiosk touchscreen.
+                          <p className="text-[11px] font-medium text-slate-500">
+                            Type this 4-digit code directly onto the kiosk touchscreen.
                           </p>
                         </div>
                       )}
                     </div>
 
-                    {/* Bottom Action Grid */}
-                    <div className="space-y-2 pt-1 border-t border-slate-100">
-                      {/* Primary Download Slip Button */}
-                      <button
-                        type="button"
-                        onClick={handleDownloadSlip}
-                        className="w-full py-2.5 px-4 rounded-xl bg-[#16a34a] hover:bg-[#15803d] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
-                      >
-                        <Download className="w-4 h-4" />
-                        <span>Download Receipt Slip</span>
-                      </button>
+                    {/* Authentically Framed Receipt Pass Section */}
+                    <div className="pt-2 border-t border-dashed border-slate-200/90">
+                      <div className="p-2 sm:p-2.5 rounded-xl bg-slate-50/90 border border-slate-200/80 space-y-1.5 shadow-2xs">
+                        <div className="flex items-center justify-between px-0.5 text-[11px]">
+                          <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                            <img src="/rit-emblem.png" alt="RIT" className="h-3.5 w-auto object-contain shrink-0" />
+                            <span>Payment Receipt Slip</span>
+                          </span>
+                          <span className="font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded text-[10px]">
+                            ₹{(order.totalAmountPaise / 100).toFixed(2)} Paid ✓
+                          </span>
+                        </div>
 
-                      {/* Secondary Action Row: WhatsApp Share */}
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={handleDownloadPdf}
+                            disabled={isDownloadingPdf}
+                            className="py-1.5 sm:py-2 px-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-98 disabled:opacity-60"
+                          >
+                            {isDownloadingPdf ? (
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Download className="w-3.5 h-3.5 text-blue-400" />
+                            )}
+                            <span>Download PDF</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              sounds.keyPress();
+                              setShowReceiptModal(true);
+                            }}
+                            className="py-1.5 sm:py-2 px-2.5 rounded-lg bg-white hover:bg-slate-100 text-slate-800 font-bold text-xs flex items-center justify-center gap-1.5 border border-slate-200 shadow-2xs transition-all cursor-pointer active:scale-98"
+                          >
+                            <Receipt className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>View Receipt</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : isExpired ? (
+                  /* STATE D: ORDER EXPIRED (5 MIN TIMEOUT) */
+                  <div className="rounded-2xl sm:rounded-3xl border-2 border-rose-200/90 bg-gradient-to-b from-white via-rose-50/20 to-rose-50/60 p-5 sm:p-6 text-slate-900 shadow-sm space-y-4 flex-1 flex flex-col justify-between text-center animate-fade-in">
+                    <div className="space-y-3 pt-2">
+                      <div className="w-14 h-14 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto shadow-sm">
+                        <Timer className="w-7 h-7 stroke-[2.2]" />
+                      </div>
+
+                      <div className="space-y-1">
+                        <h2 className="text-lg sm:text-xl font-black text-slate-900">
+                          Payment Session Expired
+                        </h2>
+                        <p className="text-xs font-semibold text-slate-500 max-w-sm mx-auto">
+                          This print order was not completed within the 5-minute window. Unpaid files have been securely shredded from the cloud vault to protect your privacy.
+                        </p>
+                      </div>
+
+                      <div className="p-3 rounded-2xl bg-white border border-rose-200/80 text-left space-y-1.5 text-xs shadow-2xs">
+                        <div className="flex justify-between">
+                          <span className="font-semibold text-slate-600">Session Limit:</span>
+                          <span className="font-black text-rose-600 font-mono">5 Minutes (Timed Out)</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="font-semibold text-slate-600">Privacy Shred:</span>
+                          <span className="font-bold text-emerald-700 font-mono">Unprinted Files Purged</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-2">
                       <Link
-                        href={`https://wa.me/918667466390?text=${encodeURIComponent(
-                          `Hi PrintPoint, my order PIN is ${order.fourDigitPin} (Order: ${order.orderNumber || order.id})`
-                        )}`}
-                        target="_blank"
-                        className="w-full py-2.5 px-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-2xs cursor-pointer"
+                        href="/upload?new=true"
+                        className="w-full py-3 px-4 rounded-xl btn-primary-glow text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md shadow-blue-500/25 transition-all cursor-pointer"
                       >
-                        <Share2 className="w-4 h-4 text-[#25D366]" />
-                        <span>Share Receipt on WhatsApp</span>
+                        <RefreshCw className="w-4 h-4" />
+                        <span>Upload &amp; Start Fresh Print</span>
                       </Link>
                     </div>
                   </div>
@@ -806,14 +1075,33 @@ export default function PrintSummaryPage() {
                           </span>
                         </div>
                       </div>
+
+                      {/* Live 5-Min Countdown Strip */}
+                      <div className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition-all ${
+                        timeLeft < 60
+                          ? 'bg-rose-50 border-rose-200 text-rose-950 animate-pulse'
+                          : 'bg-amber-50/80 border-amber-200 text-amber-950'
+                      }`}>
+                        <div className="flex items-center gap-2">
+                          <Timer className={`w-4 h-4 shrink-0 ${timeLeft < 60 ? 'text-rose-600' : 'text-amber-700'}`} />
+                          <span className="font-semibold text-[11px] sm:text-xs">
+                            {timeLeft < 60 ? 'Session expiring soon:' : 'Complete payment within:'}
+                          </span>
+                        </div>
+                        <span className={`font-mono font-black text-xs sm:text-sm ${
+                          timeLeft < 60 ? 'text-rose-600' : 'text-amber-800'
+                        }`}>
+                          {formatCountdown(timeLeft)}
+                        </span>
+                      </div>
                     </div>
 
                     {/* Grand Total & CTA */}
-                    <div className="space-y-3 pt-1">
-                      <div className="flex items-center justify-between">
+                    <div className="pt-2">
+                      <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-between gap-3">
                         <div>
-                          <span className="text-[10px] text-slate-600 font-bold block uppercase tracking-wide">Grand Total</span>
-                          <span className="text-2xl sm:text-3xl font-black text-slate-900 font-mono">
+                          <span className="text-[10px] text-slate-500 font-bold block uppercase tracking-wide">Grand Total</span>
+                          <span className="text-xl sm:text-2xl font-black text-slate-900 font-mono">
                             ₹{(order.totalAmountPaise / 100).toFixed(2)}
                           </span>
                         </div>
@@ -821,8 +1109,8 @@ export default function PrintSummaryPage() {
                         <button
                           type="button"
                           onClick={handleProceedPayment}
-                          disabled={isProcessingPay}
-                          className="py-3 px-6 rounded-2xl btn-primary-glow text-white font-black text-sm flex items-center gap-2 shadow-md shadow-blue-500/25 transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                          disabled={isProcessingPay || isExpired}
+                          className="py-3 px-5 sm:px-6 rounded-xl btn-primary-glow text-white font-black text-xs sm:text-sm flex items-center gap-2 shadow-md shadow-blue-500/25 transition-all cursor-pointer active:scale-95 disabled:opacity-50 shrink-0"
                         >
                           {isProcessingPay ? (
                             <>
@@ -847,6 +1135,230 @@ export default function PrintSummaryPage() {
           </div>
         )}
       </main>
+
+      {/* ================= AUTHENTIC FRAMED PRINT RECEIPT SLIP MODAL ================= */}
+      {showReceiptModal && order && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fade-in">
+          {/* Backdrop click dismiss */}
+          <div 
+            className="fixed inset-0 print:hidden cursor-pointer" 
+            onClick={() => setShowReceiptModal(false)} 
+          />
+
+          {/* Authentic Printable Receipt Voucher Container */}
+          <div 
+            id="printable-receipt"
+            className="relative z-10 w-full max-w-sm sm:max-w-md max-h-[90vh] bg-white rounded-3xl border border-slate-300 shadow-2xl overflow-hidden font-sans text-slate-900 my-auto flex flex-col animate-scale-up"
+          >
+            {/* Official Header with College Crest & SmartPrint Logo */}
+            <div className="bg-gradient-to-b from-slate-900 to-slate-800 py-2.5 px-3.5 text-white text-center relative border-b border-slate-700 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowReceiptModal(false)}
+                className="absolute top-2.5 right-2.5 p-1 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer print:hidden"
+                title="Close"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Official Logo Badge Container */}
+              <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-xl bg-white text-slate-900 shadow-2xs mx-auto mb-1">
+                <img
+                  src="/rit-emblem.png"
+                  alt="RIT Crest"
+                  className="h-5 w-auto object-contain block shrink-0"
+                />
+                <div className="h-3.5 w-px bg-slate-200 shrink-0" />
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className="font-black text-xs tracking-tight text-slate-900 font-sans">
+                    Smart<span className="text-[#2563eb]">Print</span>
+                  </span>
+                  <span className="flex h-1.5 w-1.5 relative shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#2563eb]" />
+                  </span>
+                </div>
+              </div>
+
+              <p className="text-[9px] font-extrabold uppercase tracking-widest text-slate-300 leading-tight">
+                Rajalakshmi Institute of Technology
+              </p>
+              <h2 className="text-xs sm:text-sm font-black tracking-tight text-white mt-0.5 leading-tight">
+                Official Payment Receipt &amp; Kiosk Pass
+              </h2>
+              <p className="text-[9px] text-blue-300 font-mono mt-0.5 leading-tight">
+                Terminal: {order.machineName || order.machineCode || 'Print ATM - Main Campus Hub'}
+              </p>
+            </div>
+
+            {/* Receipt Body (Scrollable if viewport is tiny, but naturally snug) */}
+            <div className="p-3 sm:p-3.5 space-y-2 flex-1 overflow-y-auto">
+              {/* College Authorization Watermark & Reference Strip */}
+              <div className="p-2 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2 min-w-0">
+                  <img src="/rit-emblem.png" alt="RIT Emblem" className="w-5 h-5 object-contain shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-black text-slate-900 font-mono text-xs leading-tight truncate">
+                      RCP-{order.orderNumber || order.id}
+                    </p>
+                    <p className="text-[9px] text-blue-700 font-semibold leading-tight">RIT Autonomous Network</p>
+                  </div>
+                </div>
+
+                <div className="text-right shrink-0">
+                  <span className="font-mono text-[9px] text-emerald-800 font-black bg-emerald-100/90 border border-emerald-300/80 px-2 py-0.5 rounded-md inline-block">
+                    TAX INVOICE • PAID ✓
+                  </span>
+                  <p className="font-mono text-[9px] text-slate-400 mt-0.5">
+                    {new Date(order.createdAt || Date.now()).toLocaleDateString('en-IN', {
+                      day: '2-digit',
+                      month: 'short',
+                      year: 'numeric'
+                    })}
+                  </p>
+                </div>
+              </div>
+
+              {/* Customer & Itemized Print Specifications */}
+              <div className="p-2.5 rounded-xl bg-slate-50/70 border border-slate-200/80 space-y-1 text-xs">
+                <div className="flex justify-between items-baseline font-bold text-slate-900 text-xs pb-1 border-b border-slate-200/70">
+                  <span className="truncate max-w-[200px]" title={order.fileName}>
+                    📄 {order.fileName || 'Document.pdf'}
+                  </span>
+                  <span className="font-mono font-black text-slate-900">
+                    ₹{(order.totalAmountPaise / 100).toFixed(2)}
+                  </span>
+                </div>
+
+                <div className="text-[10px] text-slate-500 font-mono flex justify-between">
+                  <span>{order.calculatedSheets || 1} Sheets ({order.colorMode === 'color' ? 'Color' : 'B&W'}, {order.duplexMode === 'duplex' ? '2-Sided' : '1-Sided'}, {order.copies || 1} {order.copies === 1 ? 'Copy' : 'Copies'})</span>
+                  <span className="text-slate-700 font-bold">{order.customerName || 'Student'}</span>
+                </div>
+
+                <div className="text-[10px] text-slate-500 font-mono flex justify-between pt-0.5">
+                  <span>Cloud Vault AES-256 Storage & Handling</span>
+                  <span className="text-emerald-700 font-bold">FREE (₹0.00)</span>
+                </div>
+
+                <div className="pt-1.5 border-t border-slate-900 flex justify-between items-baseline">
+                  <span className="font-black text-xs uppercase tracking-wide text-slate-900">Total Paid</span>
+                  <span className="font-black text-base font-mono text-[#2563eb]">
+                    ₹{(order.totalAmountPaise / 100).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Perforated Voucher Tear Line */}
+              <div className="relative my-1 py-0.5">
+                <div className="border-t border-dashed border-slate-300 w-full" />
+              </div>
+
+              {/* Kiosk Pickup Release Pass */}
+              <div className="p-2 rounded-xl bg-slate-50 border border-slate-200 text-center space-y-1">
+                <div className="flex items-center justify-center gap-3">
+                  {qrDataUrl && (
+                    <div className="p-1 bg-white rounded-lg border border-slate-200 shadow-2xs shrink-0">
+                      <img src={qrDataUrl} alt="Release QR" className="w-14 h-14 object-contain rounded" />
+                    </div>
+                  )}
+
+                  {order.fourDigitPin && (
+                    <div className="space-y-0.5 text-left">
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Pickup PIN</span>
+                      <div className="flex gap-1">
+                        {order.fourDigitPin.split('').map((d: string, i: number) => (
+                          <span
+                            key={i}
+                            className="w-6 h-7 rounded-md bg-white border border-blue-300 text-blue-600 font-black font-mono text-sm flex items-center justify-center shadow-2xs"
+                          >
+                            {d}
+                          </span>
+                        ))}
+                      </div>
+                      <p className="text-[8px] text-slate-500 mt-0.5">Scan code or enter PIN at kiosk</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Security Shield Note */}
+              <div className="text-center pt-0.5">
+                <p className="text-[9px] text-slate-400 font-medium flex items-center justify-center gap-1">
+                  <ShieldCheck className="w-3 h-3 text-emerald-600 shrink-0" />
+                  <span>Verified by SmartPrint Vault • Document auto-shreds after printing</span>
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Actions (Hidden in Print, Fixed at bottom) */}
+            <div className="p-2 sm:p-2.5 bg-slate-50 border-t border-slate-100 flex items-center gap-2 print:hidden shrink-0">
+              <button
+                type="button"
+                onClick={handleDownloadPdf}
+                disabled={isDownloadingPdf}
+                className="flex-1 py-1.5 px-3 rounded-lg bg-[#2563eb] hover:bg-blue-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-95 disabled:opacity-60"
+              >
+                {isDownloadingPdf ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Generating PDF...</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download PDF Receipt</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.keyPress();
+                  window.print();
+                }}
+                className="py-1.5 px-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                title="Print on physical printer"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Print</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowReceiptModal(false)}
+                className="py-1.5 px-3 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Global Print Styles for Clean Receipt Slip Printing */}
+      <style jsx global>{`
+        @media print {
+          body * {
+            visibility: hidden !important;
+          }
+          #printable-receipt, #printable-receipt * {
+            visibility: visible !important;
+          }
+          #printable-receipt {
+            position: fixed !important;
+            left: 50% !important;
+            top: 50% !important;
+            transform: translate(-50%, -50%) !important;
+            width: 380px !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+            border: 1px solid #cbd5e1 !important;
+            box-shadow: none !important;
+            background: #ffffff !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }

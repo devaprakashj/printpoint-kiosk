@@ -34,7 +34,7 @@ export async function GET(
           machineCode: data.machine_code,
           machineName: data.machine_name,
           customerPhone: data.customer_phone,
-          customerName: data.customer_name || 'Student',
+          customerName: data.customer_name || data.customer_email || 'Customer',
           customerEmail: data.customer_email,
           fileName: data.file_name,
           fileSizeFormatted: data.file_size_formatted,
@@ -80,7 +80,7 @@ export async function GET(
     } else if (!order && dbOrder) {
       order = {
         ...dbOrder,
-        customerName: dbOrder.customerName || 'Student',
+        customerName: dbOrder.customerName || 'Customer',
         totalAmountRupees: ((dbOrder.totalAmountPaise || 200) / 100).toFixed(2),
       };
     }

@@ -166,6 +166,7 @@ export async function POST(req: NextRequest) {
 
       if (customerName) {
         insertPayload.customer_name = String(customerName).trim().substring(0, 50);
+        insertPayload.customer_email = String(customerName).trim().substring(0, 50);
       }
 
       let insData: any = null;
@@ -175,7 +176,7 @@ export async function POST(req: NextRequest) {
       insData = res.data;
       insErr = res.error;
 
-      // If failed due to customer_name column missing, retry without it
+      // If failed due to customer_name column missing, retry with customer_email where name is stored
       if (insErr && insertPayload.customer_name) {
         delete insertPayload.customer_name;
         const retryRes = await supabaseAdmin.from('orders').insert(insertPayload).select().single();
@@ -184,13 +185,14 @@ export async function POST(req: NextRequest) {
       }
 
       if (!insErr && insData) {
+        const resolvedCustomerName = insData.customer_name || insData.customer_email || (customerName ? String(customerName).trim() : 'Customer');
         newOrder = {
           id: insData.id,
           orderNumber: insData.order_number,
           machineCode: insData.machine_code,
           machineName: insData.machine_name,
           customerPhone: insData.customer_phone,
-          customerName: insData.customer_name || (customerName ? String(customerName).trim() : 'Student'),
+          customerName: resolvedCustomerName,
           fileName: insData.file_name,
           fileSizeFormatted: insData.file_size_formatted,
           detectedTotalPages: insData.detected_total_pages,
