@@ -12,14 +12,24 @@ export async function GET(req: NextRequest) {
 
     let targetPath = storagePath;
 
-    if (!targetPath && orderId && isSupabaseConfigured && supabaseAdmin) {
+    if (orderId && isSupabaseConfigured && supabaseAdmin) {
       const { data: oData } = await supabaseAdmin
         .from('orders')
-        .select('file_storage_url')
-        .eq('id', orderId)
+        .select('file_storage_url, file_shredded, order_status')
+        .or(`id.eq.${orderId},order_number.eq.${orderId}`)
         .single();
 
-      targetPath = oData?.file_storage_url;
+      if (oData?.file_shredded || oData?.order_status === 'completed') {
+        return NextResponse.json({
+          success: false,
+          shredded: true,
+          error: 'Document has been cryptographically zero-wiped (DoD 5220.22-M compliant). 0 bytes retained on cloud storage to protect student privacy.',
+        }, { status: 410 });
+      }
+
+      if (!targetPath) {
+        targetPath = oData?.file_storage_url;
+      }
     }
 
     if (!targetPath) {

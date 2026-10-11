@@ -185,23 +185,23 @@ export default function WhiteAndBlueLandingPage() {
       </div>
 
       {/* ── HERO SECTION (MATCHING REFERENCE IN HIGH CONTRAST & ROYAL BLUE) ── */}
-      <section className="relative pt-6 xs:pt-8 sm:pt-16 pb-4 sm:pb-16 overflow-hidden reveal-on-scroll is-revealed">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-5 sm:space-y-8">
+      <section className="relative min-h-[calc(100dvh-5.5rem)] min-h-[calc(100svh-5.5rem)] sm:min-h-0 flex flex-col justify-center pt-10 xs:pt-14 sm:pt-20 pb-12 xs:pb-16 sm:pb-24 overflow-hidden reveal-on-scroll is-revealed">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 sm:space-y-8 my-auto w-full">
           
           {/* Main Hero Header */}
-          <div className="text-center space-y-3.5 sm:space-y-7 max-w-5xl mx-auto">
+          <div className="text-center space-y-4 xs:space-y-6 sm:space-y-7 max-w-5xl mx-auto">
             
             {/* High Impact Strong Black & Royal Blue Balanced Title */}
-            <h1 className="text-2xl xs:text-3xl sm:text-4xl md:text-5xl lg:text-6xl xl:text-[64px] font-black text-[#000000] tracking-[-0.035em] leading-[1.18] max-w-4xl mx-auto [text-wrap:balance]">
+            <h1 className="text-2xl xs:text-3xl sm:text-4xl md:text-5xl lg:text-6xl xl:text-[64px] font-black text-[#000000] tracking-[-0.035em] leading-[1.22] max-w-4xl mx-auto [text-wrap:balance]">
               Meet <span className="text-[#2563eb]">SmartPrint</span>, RIT&apos;s Anytime, <br className="hidden sm:inline" />
               Anywhere Instant Printing Kiosk
             </h1>
 
             {/* Hero Actions (Clean Pill Buttons with Balanced Alignment) */}
-            <div className="pt-1.5 flex flex-col sm:flex-row items-center justify-center gap-2.5 sm:gap-4 px-2 w-full max-w-xs sm:max-w-lg mx-auto">
+            <div className="pt-2 xs:pt-3 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4 px-2 w-full max-w-xs sm:max-w-lg mx-auto">
               <Link
                 href="/upload"
-                className="w-full sm:w-auto px-5 sm:px-8 py-3 sm:py-4 rounded-full bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-extrabold text-xs xs:text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 hover:shadow-blue-600/35 active:scale-98 transition-all whitespace-nowrap"
+                className="w-full sm:w-auto px-5 sm:px-8 py-3.5 sm:py-4 rounded-full bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-extrabold text-xs xs:text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 hover:shadow-blue-600/35 active:scale-98 transition-all whitespace-nowrap"
               >
                 <UploadCloud className="w-4 sm:w-5 h-4 sm:h-5 stroke-[2.5]" />
                 <span>Print Document</span>
@@ -210,23 +210,23 @@ export default function WhiteAndBlueLandingPage() {
 
               <a
                 href="#how-it-works"
-                className="w-full sm:w-auto px-5 sm:px-8 py-3 sm:py-4 rounded-full border-2 border-slate-300 hover:border-[#2563eb] text-slate-800 hover:text-[#2563eb] bg-white hover:bg-blue-50/50 font-extrabold text-xs xs:text-sm sm:text-base flex items-center justify-center gap-2 transition-all whitespace-nowrap"
+                className="w-full sm:w-auto px-5 sm:px-8 py-3.5 sm:py-4 rounded-full border-2 border-slate-300 hover:border-[#2563eb] text-slate-800 hover:text-[#2563eb] bg-white hover:bg-blue-50/50 font-extrabold text-xs xs:text-sm sm:text-base flex items-center justify-center gap-2 transition-all whitespace-nowrap"
               >
                 <span>How It Works</span>
               </a>
             </div>
 
             {/* Micro Feature Metric Pills */}
-            <div className="pt-1 sm:pt-4 flex items-center justify-center gap-1.5 xs:gap-2 sm:gap-4 flex-wrap text-[8.5px] xs:text-[10px] sm:text-xs font-bold text-slate-700 font-mono">
-              <span className="glass-pill px-2.5 xs:px-3 py-1 rounded-full flex items-center gap-1.5 border border-slate-200 shadow-2xs">
+            <div className="pt-2 xs:pt-3 sm:pt-4 flex items-center justify-center gap-1.5 xs:gap-2 sm:gap-4 flex-wrap text-[8.5px] xs:text-[10px] sm:text-xs font-bold text-slate-700 font-mono">
+              <span className="glass-pill px-2.5 xs:px-3 py-1.5 rounded-full flex items-center gap-1.5 border border-slate-200 shadow-2xs">
                 <Zap className="w-3 h-3 text-[#2563eb]" />
                 <span>30-SEC LASER FUSION</span>
               </span>
-              <span className="glass-pill px-2.5 xs:px-3 py-1 rounded-full flex items-center gap-1.5 border border-slate-200 shadow-2xs">
+              <span className="glass-pill px-2.5 xs:px-3 py-1.5 rounded-full flex items-center gap-1.5 border border-slate-200 shadow-2xs">
                 <ShieldCheck className="w-3 h-3 text-[#0284c7]" />
                 <span>DoD ZERO-MEMORY SHRED</span>
               </span>
-              <span className="glass-pill px-2.5 xs:px-3 py-1 rounded-full flex items-center gap-1.5 border border-slate-200 shadow-2xs">
+              <span className="glass-pill px-2.5 xs:px-3 py-1.5 rounded-full flex items-center gap-1.5 border border-slate-200 shadow-2xs">
                 <Clock className="w-3 h-3 text-[#2563eb]" />
                 <span>24/7 HOSTEL RADAR</span>
               </span>
@@ -237,7 +237,7 @@ export default function WhiteAndBlueLandingPage() {
       </section>
 
       {/* ── RUNNING MARQUEE RIBBONS (SLICK FULL WIDTH ON MOBILE, DYNAMIC ANGLED ON DESKTOP) ── */}
-      <div className="relative py-2 sm:py-16 overflow-hidden w-full select-none my-1 sm:my-8 flex items-center justify-center min-h-[44px] sm:min-h-[180px] max-w-full">
+      <div className="relative py-3 sm:py-16 overflow-hidden w-full select-none my-6 sm:my-8 flex items-center justify-center min-h-[46px] sm:min-h-[180px] max-w-full">
         
         {/* White Ribbon (Angled Upwards +4.5deg on Desktop, hidden on mobile for clean look) */}
         <div className="hidden sm:flex absolute w-[150%] -left-[25%] py-3.5 sm:py-5 bg-white/95 backdrop-blur-md border-y border-slate-200/90 shadow-md transform rotate-[4.5deg] overflow-hidden items-center z-10">
