@@ -136,11 +136,6 @@ export default function QwikprintAuthenticApp() {
   // Help Modal
   const [showHelpModal, setShowHelpModal] = useState(false);
 
-  // Landing Page Interactive Calculator State
-  const [calcPages, setCalcPages] = useState<number>(10);
-  const [calcColor, setCalcColor] = useState<'bw' | 'color'>('bw');
-  const [calcDuplex, setCalcDuplex] = useState<boolean>(true);
-
   // Fetch Machines & Pricing
   const loadKiosks = async () => {
     try {
@@ -1617,11 +1612,6 @@ export default function QwikprintAuthenticApp() {
           <div className="space-y-4 animate-fade-in">
             {/* 1. HERO BANNER SECTION (Compact & Above-the-fold) */}
             <div className="text-center space-y-2 pt-1">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-blue-200 text-[#2563eb] text-[11px] font-extrabold shadow-2xs">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                <span>RIT Campus 24/7 Autonomous Cloud Printing Network</span>
-              </div>
-
               <div className="max-w-2xl mx-auto space-y-1">
                 <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-slate-900 tracking-tight leading-tight">
                   Print Anywhere. <span className="bg-gradient-to-r from-[#2563eb] to-[#1d4ed8] bg-clip-text text-transparent">Collect in 30 Seconds.</span>
@@ -1815,171 +1805,7 @@ export default function QwikprintAuthenticApp() {
               </div>
             </div>
 
-            {/* 4. INTERACTIVE LIVE COST CALCULATOR */}
-            <div className="rounded-3xl border border-blue-200/80 bg-white p-7 shadow-sm space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div>
-                  <h2 className="text-xl font-extrabold text-slate-900">Live Cost & Savings Calculator</h2>
-                  <p className="text-xs text-slate-500 font-medium">Estimate your exact printing costs with zero hidden charges</p>
-                </div>
-                <div className="text-xs font-bold text-[#2563eb] bg-blue-50 px-3 py-1 rounded-xl border border-blue-200 self-start sm:self-auto">
-                  ⚡ Transparent Pricing
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-center">
-                <div className="space-y-4">
-                  {/* Pages Slider */}
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between text-xs font-bold text-slate-700">
-                      <span>Number of Document Pages:</span>
-                      <span className="text-[#2563eb] font-mono text-sm font-black">{calcPages} Pages</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="1"
-                      max="100"
-                      value={calcPages}
-                      onChange={e => setCalcPages(parseInt(e.target.value) || 1)}
-                      className="w-full accent-[#2563eb] h-2 bg-slate-100 rounded-lg cursor-pointer"
-                    />
-                  </div>
-
-                  {/* Mode Toggles */}
-                  <div className="grid grid-cols-2 gap-3 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setCalcColor('bw')}
-                      className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-between transition-all cursor-pointer ${
-                        calcColor === 'bw'
-                          ? 'bg-blue-50 border-[#2563eb] text-[#2563eb] shadow-2xs'
-                          : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
-                      }`}
-                    >
-                      <span>Black & White</span>
-                      <span>₹2 / page</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setCalcColor('color')}
-                      className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-between transition-all cursor-pointer ${
-                        calcColor === 'color'
-                          ? 'bg-blue-50 border-[#2563eb] text-[#2563eb] shadow-2xs'
-                          : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
-                      }`}
-                    >
-                      <span>Full Color</span>
-                      <span>₹10 / page</span>
-                    </button>
-                  </div>
-
-                  {/* Duplex Toggle */}
-                  <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
-                    <span className="font-bold text-slate-700">Duplex Printing (Both Sides):</span>
-                    <button
-                      type="button"
-                      onClick={() => setCalcDuplex(!calcDuplex)}
-                      className={`px-3 py-1 rounded-lg font-extrabold text-xs transition-all cursor-pointer ${
-                        calcDuplex
-                          ? 'bg-[#2563eb] text-white'
-                          : 'bg-slate-200 text-slate-600'
-                      }`}
-                    >
-                      {calcDuplex ? 'Duplex (Save Paper)' : 'Single Sided'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Calculation Output Card */}
-                <div className="p-6 rounded-2xl bg-gradient-to-br from-[#2563eb] to-[#1d4ed8] text-white space-y-4 shadow-lg shadow-blue-500/20">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <span className="text-xs font-bold opacity-80 uppercase tracking-wider">Estimated Total</span>
-                      <div className="text-4xl font-black mt-1">
-                        ₹{(() => {
-                          const rate = calcColor === 'color' ? 10 : 2;
-                          const duplexDiscount = calcDuplex ? 0.85 : 1;
-                          return Math.max(2, Math.round(calcPages * rate * duplexDiscount));
-                        })()}
-                      </div>
-                    </div>
-                    <span className="bg-white/20 text-white text-[10px] font-extrabold px-2.5 py-1 rounded-full backdrop-blur-xs">
-                      Instant Print
-                    </span>
-                  </div>
-
-                  <div className="space-y-1.5 text-xs border-t border-white/20 pt-3 opacity-90">
-                    <div className="flex justify-between">
-                      <span>Physical Paper Sheets:</span>
-                      <span className="font-bold">{calcDuplex ? Math.ceil(calcPages / 2) : calcPages} Sheets</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Queue Wait Time:</span>
-                      <span className="font-bold">0 Seconds (Instant)</span>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="w-full py-2.5 rounded-xl bg-white text-[#2563eb] font-black text-xs hover:bg-slate-50 transition-all cursor-pointer shadow-sm"
-                  >
-                    Print This Document Now &rarr;
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* 5. LIVE KIOSKS NETWORK LOCATIONS */}
-            <div id="kiosk-locations" className="rounded-3xl border border-blue-200/80 bg-white p-7 shadow-sm space-y-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-xl font-extrabold text-slate-900">Live Kiosk Network Locations</h2>
-                  <p className="text-xs text-slate-500 font-medium">Walk up to any active terminal to print and collect</p>
-                </div>
-                <span className="text-xs font-bold text-[#2563eb] bg-blue-50 px-3 py-1 rounded-xl border border-blue-200">
-                  ● 100% Operational
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {machines.map(m => (
-                  <div key={m.id} className="p-4 rounded-2xl bg-slate-50/80 border border-slate-200 space-y-2">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="font-bold text-xs text-slate-900">{m.displayName}</div>
-                        <div className="text-[10px] text-slate-500 mt-0.5">{m.locationDescription}</div>
-                      </div>
-                      <span className="text-[9px] font-extrabold text-[#2563eb] bg-blue-50 px-2 py-0.5 rounded-full border border-[#2563eb]/30">
-                        ONLINE
-                      </span>
-                    </div>
-                    <div className="text-[10px] text-slate-400 font-mono pt-1 border-t border-slate-200 flex justify-between">
-                      <span>ID: {m.machineCode}</span>
-                      <span className="text-blue-700 font-bold">{m.currentSheetsRemaining} sheets ready</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* 6. ZERO-KNOWLEDGE SECURITY SHIELD */}
-            <div className="rounded-3xl border border-blue-200/80 bg-gradient-to-r from-blue-50 via-white to-blue-50 p-6 sm:p-7 shadow-sm flex flex-col sm:flex-row items-center gap-5">
-              <div className="w-14 h-14 rounded-2xl bg-[#2563eb] text-white flex items-center justify-center shrink-0 shadow-md shadow-blue-500/20">
-                <ShieldCheck className="w-8 h-8" />
-              </div>
-              <div className="space-y-1 text-center sm:text-left">
-                <h3 className="font-extrabold text-base text-slate-900">
-                  100% Zero-Knowledge Privacy & Military-Grade RAM Shredding
-                </h3>
-                <p className="text-xs text-slate-600 leading-relaxed max-w-2xl">
-                  Your confidential documents, resumes, and study materials are encrypted with AES-256 in memory and permanently wiped using DoD 5220.22-M cryptographic zero-shred the instant printing is fulfilled at the kiosk.
-                </p>
-              </div>
-            </div>
-
-            {/* 7. FOOTER */}
+            {/* FOOTER */}
             <footer className="border-t border-blue-200/70 pt-6 pb-2 text-center text-xs text-slate-500 space-y-3">
               <div className="flex items-center justify-center gap-6 font-bold text-slate-700 flex-wrap">
                 <button type="button" onClick={() => setShowHelpModal(true)} className="hover:text-[#2563eb]">
