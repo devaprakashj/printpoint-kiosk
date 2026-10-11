@@ -97,27 +97,39 @@ export default function WhiteAndBlueLandingPage() {
       />
 
       {/* ── FLOATING PILL NAVIGATION (CENTERED LOGO MATCHING REFERENCE) ── */}
-      <div className="sticky top-2 sm:top-5 z-50 max-w-5xl mx-auto px-2 xs:px-4 sm:px-6">
-        <header className="rounded-full bg-white/95 backdrop-blur-md px-2.5 xs:px-4 sm:px-8 py-1.5 xs:py-2 sm:py-3 flex items-center justify-between border border-slate-200/90 shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-all duration-300">
+      <div className="sticky top-2 sm:top-5 z-50 max-w-5xl mx-auto px-2 xs:px-4 sm:px-6 flex justify-center">
+        <header className="w-full md:w-fit rounded-full bg-white/95 backdrop-blur-md px-3 xs:px-4 md:px-8 py-2 md:py-2.5 flex items-center justify-between md:justify-center border border-slate-200/90 shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-all duration-300">
           
-          {/* Left Nav Links (Desktop) */}
-          <nav className="hidden md:flex items-center gap-6 lg:gap-8 text-xs sm:text-sm font-bold text-slate-800">
-            <a href="#how-it-works" className="hover:text-[#2563eb] transition-colors">
-              How It Works
-            </a>
-            <a href="#features" className="hover:text-[#2563eb] transition-colors">
-              Features
-            </a>
-          </nav>
-
-          {/* Centered Logo */}
-          <div className="flex items-center justify-center shrink-0">
-            <Logo size="md" />
+          {/* Mobile Layout (Logo Left, Hamburger Right) */}
+          <div className="flex md:hidden items-center justify-between w-full">
+            <Logo size="sm" />
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="p-1.5 xs:p-2 rounded-full bg-slate-100 border border-slate-200 text-slate-700 hover:bg-slate-200 transition-colors shrink-0"
+              aria-label="Toggle navigation"
+            >
+              {mobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+            </button>
           </div>
 
-          {/* Right Nav Links & CTA Action */}
-          <div className="flex items-center gap-1.5 xs:gap-2 sm:gap-6 lg:gap-8 shrink-0">
-            <nav className="hidden md:flex items-center gap-6 lg:gap-8 text-xs sm:text-sm font-bold text-slate-800">
+          {/* Desktop Layout (Perfect Centered Menu: 2 Links Left, Centered Logo, 2 Links Right) */}
+          <div className="hidden md:flex items-center justify-center gap-6 lg:gap-8">
+            <nav className="flex items-center gap-6 lg:gap-8 text-xs sm:text-sm font-bold text-slate-800">
+              <a href="#how-it-works" className="hover:text-[#2563eb] transition-colors">
+                How It Works
+              </a>
+              <a href="#features" className="hover:text-[#2563eb] transition-colors">
+                Features
+              </a>
+            </nav>
+
+            {/* Centered Logo */}
+            <div className="flex items-center justify-center shrink-0 px-2 lg:px-4">
+              <Logo size="md" />
+            </div>
+
+            <nav className="flex items-center gap-6 lg:gap-8 text-xs sm:text-sm font-bold text-slate-800">
               <a href="#comparison" className="hover:text-[#2563eb] transition-colors">
                 Comparison
               </a>
@@ -125,26 +137,6 @@ export default function WhiteAndBlueLandingPage() {
                 FAQ &amp; Support
               </a>
             </nav>
-
-            <Link
-              href="/upload"
-              className="px-2.5 xs:px-4 sm:px-6 py-1.5 xs:py-2 sm:py-2.5 rounded-full bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-extrabold text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2 shadow-md shadow-blue-500/25 active:scale-95 transition-all shrink-0"
-            >
-              <UploadCloud className="w-3.5 sm:w-4 h-3.5 sm:h-4 stroke-[2.5]" />
-              <span className="hidden xs:inline">Print Document</span>
-              <span className="xs:hidden">Print</span>
-              <ArrowRight className="w-3.5 h-3.5 hidden sm:inline-block" />
-            </Link>
-
-            {/* Mobile Hamburger Button */}
-            <button
-              type="button"
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="md:hidden p-1.5 xs:p-2 rounded-full bg-slate-100 border border-slate-200 text-slate-700 hover:bg-slate-200 transition-colors shrink-0"
-              aria-label="Toggle navigation"
-            >
-              {mobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
-            </button>
           </div>
         </header>
 
