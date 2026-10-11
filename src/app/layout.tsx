@@ -15,10 +15,10 @@ export const metadata: Metadata = {
   description: 'SmartPrint - Autonomous Self-Service Printing Kiosks for Rajalakshmi Institute of Technology. Upload anywhere, get warm prints in 30 seconds.',
   icons: {
     icon: [
-      { url: '/rit-logo.png', type: 'image/png' },
+      { url: '/rit-crest.png', type: 'image/png' },
     ],
-    shortcut: '/rit-logo.png',
-    apple: '/rit-logo.png',
+    shortcut: '/rit-crest.png',
+    apple: '/rit-crest.png',
   },
 };
 
@@ -30,8 +30,8 @@ export default function RootLayout({
   return (
     <html lang="en" className={jakarta.variable}>
       <head>
-        <link rel="icon" type="image/png" href="/rit-logo.png" />
-        <link rel="apple-touch-icon" href="/rit-logo.png" />
+        <link rel="icon" type="image/png" href="/rit-crest.png" />
+        <link rel="apple-touch-icon" href="/rit-crest.png" />
         <Script
           src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"
           strategy="beforeInteractive"
