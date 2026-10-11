@@ -16,6 +16,8 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: hidden;
+  max-width: 100vw;
 }
 
 body {
@@ -26,6 +28,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
   letter-spacing: -0.02em;
   overflow-x: hidden;
+  max-width: 100vw;
 }
 
 /* ── Smooth Scroll Reveal Transitions ── */

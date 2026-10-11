@@ -88,7 +88,7 @@ export default function WhiteAndBlueLandingPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-900 font-sans selection:bg-[#2563eb] selection:text-white relative bg-futuristic-grid overflow-x-hidden">
+    <div className="min-h-screen bg-[#f8fafc] text-slate-900 font-sans selection:bg-[#2563eb] selection:text-white relative bg-futuristic-grid">
       
       {/* ── TOP SCROLL PROGRESS BAR ── */}
       <div 
