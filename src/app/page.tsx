@@ -46,54 +46,37 @@ export default function WhiteAndBlueLandingPage() {
   // FAQ Accordion State
   const [openFaq, setOpenFaq] = useState<number | null>(0);
 
-  // Top Scroll Progress State
-  const [scrollProgress, setScrollProgress] = useState(0);
+  // Top Scroll Progress Bar Ref (Zero React re-renders on scroll!)
+  const progressBarRef = React.useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Scroll progress handler
+    let ticking = false;
     const handleScroll = () => {
-      const totalScroll = document.documentElement.scrollTop;
-      const windowHeight = document.documentElement.scrollHeight - document.documentElement.clientHeight;
-      if (windowHeight > 0) {
-        const scroll = (totalScroll / windowHeight) * 100;
-        setScrollProgress(scroll);
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          const totalScroll = window.scrollY || document.documentElement.scrollTop;
+          const windowHeight = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+          if (windowHeight > 0 && progressBarRef.current) {
+            const scroll = (totalScroll / windowHeight) * 100;
+            progressBarRef.current.style.width = `${scroll}%`;
+          }
+          ticking = false;
+        });
+        ticking = true;
       }
     };
 
     window.addEventListener('scroll', handleScroll, { passive: true });
-
-    // IntersectionObserver for smooth scroll-reveal effect on sections
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            entry.target.classList.add('is-revealed');
-          }
-        });
-      },
-      {
-        threshold: 0.08,
-        rootMargin: '0px 0px -40px 0px'
-      }
-    );
-
-    const elements = document.querySelectorAll('.reveal-on-scroll');
-    elements.forEach((el) => observer.observe(el));
-
-    return () => {
-      window.removeEventListener('scroll', handleScroll);
-      elements.forEach((el) => observer.unobserve(el));
-      observer.disconnect();
-    };
+    return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-900 font-sans selection:bg-[#2563eb] selection:text-white relative bg-futuristic-grid">
       
-      {/* ── TOP SCROLL PROGRESS BAR ── */}
+      {/* ── TOP SCROLL PROGRESS BAR (GPU DIRECT COMPOSITOR) ── */}
       <div 
-        className="fixed top-0 left-0 h-1 bg-gradient-to-r from-[#2563eb] via-cyan-400 to-emerald-400 z-[100] transition-all duration-150"
-        style={{ width: `${scrollProgress}%` }}
+        ref={progressBarRef}
+        className="fixed top-0 left-0 h-1 bg-gradient-to-r from-[#2563eb] via-cyan-400 to-emerald-400 z-[100] w-0 pointer-events-none"
       />
 
       {/* ── FLOATING PILL NAVIGATION (CENTERED LOGO MATCHING REFERENCE) ── */}
@@ -202,11 +185,11 @@ export default function WhiteAndBlueLandingPage() {
       </div>
 
       {/* ── HERO SECTION (MATCHING REFERENCE IN HIGH CONTRAST & ROYAL BLUE) ── */}
-      <section className="relative pt-12 xs:pt-14 sm:pt-20 pb-10 sm:pb-24 overflow-hidden reveal-on-scroll is-revealed">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 sm:space-y-8">
+      <section className="relative pt-6 xs:pt-8 sm:pt-16 pb-4 sm:pb-16 overflow-hidden reveal-on-scroll is-revealed">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-5 sm:space-y-8">
           
           {/* Main Hero Header */}
-          <div className="text-center space-y-4 sm:space-y-7 max-w-5xl mx-auto">
+          <div className="text-center space-y-3.5 sm:space-y-7 max-w-5xl mx-auto">
             
             {/* High Impact Strong Black & Royal Blue Balanced Title */}
             <h1 className="text-2xl xs:text-3xl sm:text-4xl md:text-5xl lg:text-6xl xl:text-[64px] font-black text-[#000000] tracking-[-0.035em] leading-[1.18] max-w-4xl mx-auto [text-wrap:balance]">
@@ -215,7 +198,7 @@ export default function WhiteAndBlueLandingPage() {
             </h1>
 
             {/* Hero Actions (Clean Pill Buttons with Balanced Alignment) */}
-            <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-2.5 sm:gap-4 px-2 w-full max-w-xs sm:max-w-lg mx-auto">
+            <div className="pt-1.5 flex flex-col sm:flex-row items-center justify-center gap-2.5 sm:gap-4 px-2 w-full max-w-xs sm:max-w-lg mx-auto">
               <Link
                 href="/upload"
                 className="w-full sm:w-auto px-5 sm:px-8 py-3 sm:py-4 rounded-full bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-extrabold text-xs xs:text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 hover:shadow-blue-600/35 active:scale-98 transition-all whitespace-nowrap"
@@ -234,7 +217,7 @@ export default function WhiteAndBlueLandingPage() {
             </div>
 
             {/* Micro Feature Metric Pills */}
-            <div className="pt-1.5 sm:pt-4 flex items-center justify-center gap-1.5 xs:gap-2 sm:gap-4 flex-wrap text-[8.5px] xs:text-[10px] sm:text-xs font-bold text-slate-700 font-mono">
+            <div className="pt-1 sm:pt-4 flex items-center justify-center gap-1.5 xs:gap-2 sm:gap-4 flex-wrap text-[8.5px] xs:text-[10px] sm:text-xs font-bold text-slate-700 font-mono">
               <span className="glass-pill px-2.5 xs:px-3 py-1 rounded-full flex items-center gap-1.5 border border-slate-200 shadow-2xs">
                 <Zap className="w-3 h-3 text-[#2563eb]" />
                 <span>30-SEC LASER FUSION</span>
@@ -254,7 +237,7 @@ export default function WhiteAndBlueLandingPage() {
       </section>
 
       {/* ── RUNNING MARQUEE RIBBONS (SLICK FULL WIDTH ON MOBILE, DYNAMIC ANGLED ON DESKTOP) ── */}
-      <div className="relative py-3 sm:py-20 overflow-hidden w-full select-none my-2 sm:my-10 flex items-center justify-center min-h-[50px] sm:min-h-[220px] max-w-full">
+      <div className="relative py-2 sm:py-16 overflow-hidden w-full select-none my-1 sm:my-8 flex items-center justify-center min-h-[44px] sm:min-h-[180px] max-w-full">
         
         {/* White Ribbon (Angled Upwards +4.5deg on Desktop, hidden on mobile for clean look) */}
         <div className="hidden sm:flex absolute w-[150%] -left-[25%] py-3.5 sm:py-5 bg-white/95 backdrop-blur-md border-y border-slate-200/90 shadow-md transform rotate-[4.5deg] overflow-hidden items-center z-10">
@@ -285,7 +268,7 @@ export default function WhiteAndBlueLandingPage() {
         </div>
 
         {/* Royal Blue Ribbon (Horizontal on Mobile, Angled Downwards -4.5deg on Desktop) */}
-        <div className="absolute w-[200%] sm:w-[150%] -left-[50%] sm:-left-[25%] py-2.5 sm:py-5.5 bg-gradient-to-r from-[#2563eb] via-[#1d4ed8] to-[#2563eb] text-white shadow-lg sm:shadow-2xl transform rotate-0 sm:-rotate-[4.5deg] overflow-hidden flex items-center z-20">
+        <div className="absolute w-[200%] sm:w-[150%] -left-[50%] sm:-left-[25%] py-2 sm:py-5 bg-gradient-to-r from-[#2563eb] via-[#1d4ed8] to-[#2563eb] text-white shadow-md sm:shadow-2xl transform rotate-0 sm:-rotate-[4.5deg] overflow-hidden flex items-center z-20">
           <div className="animate-marquee-reverse gap-6 sm:gap-14 text-xs sm:text-base font-black text-white tracking-wide font-sans">
             <div className="flex items-center gap-4 sm:gap-8 shrink-0">
               <span>Smart Printing</span> <span className="text-white/80 text-xs sm:text-base">✦</span>
@@ -313,14 +296,14 @@ export default function WhiteAndBlueLandingPage() {
       </div>
 
       {/* ── 4-STEP HOW IT WORKS WORKFLOW (EXACT MATCH TO COMPETITOR DESIGN IN ROYAL BLUE) ── */}
-      <section id="how-it-works" className="py-14 sm:py-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10 sm:space-y-14 reveal-on-scroll">
+      <section id="how-it-works" className="pt-4 pb-12 sm:py-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 sm:space-y-14 scroll-section">
         
         {/* Section Header */}
-        <div className="text-center space-y-2 sm:space-y-3 max-w-2xl mx-auto">
-          <p className="text-sm sm:text-base font-semibold text-slate-500 tracking-wide">
+        <div className="text-center space-y-1.5 sm:space-y-3 max-w-2xl mx-auto">
+          <p className="text-xs sm:text-base font-semibold text-slate-500 tracking-wide">
             Fast. Secure. Completely Contactless.
           </p>
-          <h2 className="text-3xl sm:text-5xl font-black text-[#000000] tracking-tight">
+          <h2 className="text-2xl sm:text-5xl font-black text-[#000000] tracking-tight">
             How It Works
           </h2>
         </div>
@@ -1018,7 +1001,7 @@ export default function WhiteAndBlueLandingPage() {
       </section>
 
       {/* ── FEATURES SECTION (CAMPUS DEPLOYMENT FEASIBILITY & BENEFITS) ── */}
-      <section id="features" className="py-14 sm:py-24 max-w-7xl mx-auto px-3.5 sm:px-6 lg:px-8 space-y-8 sm:space-y-14 reveal-on-scroll">
+      <section id="features" className="py-14 sm:py-24 max-w-7xl mx-auto px-3.5 sm:px-6 lg:px-8 space-y-8 sm:space-y-14 scroll-section">
         
         {/* Section Header */}
         <div className="text-center space-y-2.5 sm:space-y-3 max-w-3xl mx-auto">
@@ -1137,7 +1120,7 @@ export default function WhiteAndBlueLandingPage() {
       </section>
 
       {/* ── SMARTER VS TRADITIONAL COMPARISON SECTION ── */}
-      <section id="comparison" className="py-14 sm:py-24 max-w-6xl mx-auto px-3.5 sm:px-6 lg:px-8 space-y-8 sm:space-y-14 reveal-on-scroll">
+      <section id="comparison" className="py-14 sm:py-24 max-w-6xl mx-auto px-3.5 sm:px-6 lg:px-8 space-y-8 sm:space-y-14 scroll-section">
         
         {/* Section Header */}
         <div className="text-center space-y-2.5 sm:space-y-3.5 max-w-3xl mx-auto">
@@ -1160,9 +1143,9 @@ export default function WhiteAndBlueLandingPage() {
         {/* 2-Column Comparison Card with Premium Frame & Aura */}
         <div className="rounded-[24px] xs:rounded-[32px] sm:rounded-[40px] bg-white border border-slate-200 shadow-2xl p-4 xs:p-6 sm:p-10 lg:p-12 relative overflow-hidden bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:24px_24px]">
           
-          {/* Ambient Glows */}
-          <div className="absolute -top-24 -right-24 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute -bottom-24 -left-24 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
+          {/* Lightweight Ambient Glows */}
+          <div className="absolute -top-24 -right-24 w-72 h-72 bg-blue-500/8 rounded-full blur-xl pointer-events-none" />
+          <div className="absolute -bottom-24 -left-24 w-72 h-72 bg-blue-600/8 rounded-full blur-xl pointer-events-none" />
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8 lg:gap-10 items-stretch relative z-10">
             
@@ -1258,7 +1241,7 @@ export default function WhiteAndBlueLandingPage() {
       </section>
 
       {/* ── FAQ ACCORDION ── */}
-      <section id="faq" className="py-12 sm:py-28 max-w-4xl mx-auto px-3.5 sm:px-6 lg:px-8 space-y-6 sm:space-y-10 reveal-on-scroll">
+      <section id="faq" className="py-12 sm:py-28 max-w-4xl mx-auto px-3.5 sm:px-6 lg:px-8 space-y-6 sm:space-y-10 scroll-section">
         <div className="text-center space-y-2 sm:space-y-3">
           <span className="px-3 py-1 rounded-full bg-white border border-slate-200 text-slate-700 text-[10px] sm:text-xs font-mono font-bold shadow-2xs">
             CAMPUS ASSISTANCE
@@ -1319,7 +1302,7 @@ export default function WhiteAndBlueLandingPage() {
       </section>
 
       {/* ── CLEAN WHITE FOOTER (MATCHING REFERENCE DESIGN) ── */}
-      <footer className="bg-white border-t border-slate-200/90 pt-12 sm:pt-16 pb-8 sm:pb-10 text-xs sm:text-sm text-slate-600 reveal-on-scroll">
+      <footer className="bg-white border-t border-slate-200/90 pt-12 sm:pt-16 pb-8 sm:pb-10 text-xs sm:text-sm text-slate-600 reveal-on-scroll is-revealed">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10 sm:space-y-12">
           
           <div className="flex flex-col lg:flex-row justify-between gap-8 lg:gap-16">

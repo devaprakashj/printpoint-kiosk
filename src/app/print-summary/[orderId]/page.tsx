@@ -398,8 +398,8 @@ export default function PrintSummaryPage() {
       <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="lazyOnload" />
 
       {/* COMPACT TOP HEADER */}
-      <header className="h-12 sm:h-13 px-4 sm:px-8 border-b border-slate-200/90 bg-white/95 backdrop-blur-md shrink-0 z-30 flex items-center justify-between">
-        <div className="flex items-center gap-2.5 sm:gap-3">
+      <header className="h-12 sm:h-13 px-3.5 sm:px-6 lg:px-8 border-b border-slate-200/90 bg-white/95 backdrop-blur-md shrink-0 z-30 flex items-center justify-between">
+        <div className="flex items-center gap-2 sm:gap-3">
           <Link
             href="/upload?new=true"
             className="h-8 w-8 sm:w-auto sm:px-3 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center sm:justify-start gap-1.5 text-xs font-bold text-slate-700 transition-colors shrink-0"
@@ -412,10 +412,19 @@ export default function PrintSummaryPage() {
             <Logo size="sm" />
           </div>
         </div>
+
+        <div className="flex items-center gap-2">
+          {order?.orderNumber && (
+            <span className="hidden sm:inline-block px-2.5 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-[11px] font-mono font-bold text-slate-700">
+              {order.orderNumber}
+            </span>
+          )}
+          <img src="/rit-emblem.png" alt="RIT" className="h-6 w-auto object-contain shrink-0" />
+        </div>
       </header>
 
       {/* MAIN CONTAINER: COMPACT FULL-FRAME VIEWPORT */}
-      <main className="flex-1 max-w-5xl w-full mx-auto px-3.5 sm:px-6 lg:px-8 py-2 sm:py-2.5 lg:py-2 flex flex-col lg:justify-center overflow-y-auto">
+      <main className="flex-1 max-w-5xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-2 sm:py-2.5 lg:py-2 flex flex-col lg:justify-center overflow-y-auto">
         {loading && (
           <div className="py-20 text-center space-y-3">
             <RefreshCw className="w-8 h-8 text-[#2563eb] animate-spin mx-auto" />
@@ -440,94 +449,207 @@ export default function PrintSummaryPage() {
         {!loading && !error && order && (
           <div className="space-y-2 sm:space-y-2.5 animate-fade-in">
             {/* 1. Header Strip with Live Delivery Status */}
-            <div className="space-y-1 sm:space-y-0 sm:flex sm:items-center sm:justify-between border-b border-slate-200/80 pb-1.5 sm:pb-2">
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h1 className="text-base sm:text-xl font-black text-slate-900 tracking-tight">
-                    {isDelivered 
-                      ? 'Print Completed! 🎉' 
-                      : isPrinting 
-                      ? 'Printing at Kiosk Now...' 
-                      : isPaid 
-                      ? 'Print Code Ready!' 
-                      : isExpired
-                      ? 'Order Payment Expired'
-                      : 'Print Order Summary'}
-                  </h1>
+            <div className="flex items-center justify-between border-b border-slate-200/80 pb-2">
+              <div className="min-w-0 flex items-center gap-2">
+                <h1 className="text-base sm:text-xl font-black text-slate-900 tracking-tight truncate">
+                  {isDelivered 
+                    ? 'Print Completed! 🎉' 
+                    : isPrinting 
+                    ? 'Printing at Kiosk Now...' 
+                    : isPaid 
+                    ? 'Print Code Ready!' 
+                    : isExpired
+                    ? 'Order Payment Expired'
+                    : 'Print Order Summary'}
+                </h1>
+              </div>
 
-                  {/* Status Badges */}
-                  {isDelivered ? (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold font-mono uppercase bg-emerald-100 text-emerald-900 border border-emerald-400 flex items-center gap-1 shadow-2xs">
-                      <CheckCircle className="w-3 h-3 text-emerald-700" />
-                      <span>COLLECTED</span>
-                    </span>
-                  ) : isPrinting ? (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold font-mono uppercase bg-blue-100 text-blue-900 border border-blue-400 flex items-center gap-1 animate-pulse">
-                      <RefreshCw className="w-3 h-3 animate-spin text-blue-700" />
-                      <span>PRINTING</span>
-                    </span>
-                  ) : isPaid ? (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold font-mono uppercase bg-amber-50 text-amber-900 border border-amber-300 flex items-center gap-1">
-                      <Timer className="w-3 h-3 text-amber-700" />
-                      <span>READY FOR PICKUP</span>
-                    </span>
-                  ) : isExpired ? (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold font-mono uppercase bg-rose-50 text-rose-800 border border-rose-300 flex items-center gap-1 shadow-2xs">
-                      <AlertTriangle className="w-3 h-3 text-rose-600" />
-                      <span>EXPIRED</span>
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold font-mono uppercase bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-ping" />
-                      <span>PAYMENT PENDING</span>
-                    </span>
-                  )}
-                </div>
-
-                {/* Subtitle / Expiry countdown for pending orders */}
-                {!isDelivered && !isPrinting && !isPaid && !isExpired && (
-                  <p className="text-xs font-medium text-slate-500 flex items-center gap-1.5 mt-0.5">
-                    <span>Order #{order.orderNumber || order.id}</span>
-                    <span>•</span>
-                    <span className={`inline-flex items-center gap-1 font-mono font-bold ${
-                      timeLeft < 60 ? 'text-rose-600 animate-pulse' : 'text-amber-700'
-                    }`}>
-                      <Timer className="w-3.5 h-3.5" />
-                      Expires in {formatCountdown(timeLeft)}
-                    </span>
-                  </p>
+              {/* Status Badges */}
+              <div className="shrink-0 ml-2">
+                {isDelivered ? (
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-bold font-mono uppercase bg-emerald-100 text-emerald-900 border border-emerald-400 flex items-center gap-1 shadow-2xs">
+                    <CheckCircle className="w-3 h-3 text-emerald-700" />
+                    <span>COLLECTED</span>
+                  </span>
+                ) : isPrinting ? (
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-bold font-mono uppercase bg-blue-100 text-blue-900 border border-blue-400 flex items-center gap-1 animate-pulse">
+                    <RefreshCw className="w-3 h-3 animate-spin text-blue-700" />
+                    <span>PRINTING</span>
+                  </span>
+                ) : isPaid ? (
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-bold font-mono uppercase bg-amber-50 text-amber-900 border border-amber-300 flex items-center gap-1">
+                    <Timer className="w-3 h-3 text-amber-700" />
+                    <span>READY FOR PICKUP</span>
+                  </span>
+                ) : isExpired ? (
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-bold font-mono uppercase bg-rose-50 text-rose-800 border border-rose-300 flex items-center gap-1 shadow-2xs">
+                    <AlertTriangle className="w-3 h-3 text-rose-600" />
+                    <span>EXPIRED</span>
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold font-mono uppercase bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-ping" />
+                    <span>PAYMENT PENDING</span>
+                  </span>
                 )}
               </div>
-
-              <div className="hidden sm:flex items-center gap-2">
-                <p className="text-xs text-slate-500 font-mono">
-                  Order ID: <strong className="text-slate-800">{order.orderNumber || order.id}</strong>
-                </p>
-              </div>
             </div>
+
+            {/* Subtitle / Expiry countdown for pending orders */}
+            {!isDelivered && !isPrinting && !isPaid && !isExpired && (
+              <p className="text-xs font-medium text-slate-500 flex items-center gap-1.5">
+                <span>Order #{order.orderNumber || order.id}</span>
+                <span>•</span>
+                <span className={`inline-flex items-center gap-1 font-mono font-bold ${
+                  timeLeft < 60 ? 'text-rose-600 animate-pulse' : 'text-amber-700'
+                }`}>
+                  <Timer className="w-3.5 h-3.5" />
+                  Expires in {formatCountdown(timeLeft)}
+                </span>
+              </p>
+            )}
 
             {/* 2. Responsive 2-Column Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 sm:gap-3.5 items-stretch">
               
-              {/* ================= LEFT COLUMN (6 COLS): DOCUMENT + SPECIFICATIONS + 3-STEP STATUS ================= */}
+              {/* ================= LEFT COLUMN (6 COLS): PIPELINE STATUS + DOCUMENT SPECS ================= */}
               <div className={`lg:col-span-6 flex flex-col justify-between space-y-2 sm:space-y-2.5 ${
                 isPaid || isDelivered ? 'order-2 lg:order-1' : 'order-1'
               }`}>
-                {/* Mobile Specs Toggle Button (When Paid) */}
-                {isPaid && (
-                  <div className="lg:hidden text-center py-0.5">
+                {/* C. Real Connected Campus Kiosk Pipeline Tracker */}
+                <div className="rounded-2xl border border-slate-200/90 bg-white p-2.5 sm:p-3 shadow-xs space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-800">
+                      Live Order Progress
+                    </span>
+
+                    {/* Active Status Pill */}
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200/70 text-[11px] font-bold font-mono text-slate-700">
+                      <span className={`w-1.5 h-1.5 rounded-full ${
+                        isDelivered 
+                          ? 'bg-emerald-500' 
+                          : isPrinting 
+                          ? 'bg-blue-600 animate-ping' 
+                          : isPaid 
+                          ? 'bg-blue-600 animate-pulse' 
+                          : isExpired 
+                          ? 'bg-rose-500' 
+                          : 'bg-amber-500 animate-pulse'
+                      }`} />
+                      <span>
+                        {isDelivered 
+                          ? 'Completed' 
+                          : isPrinting 
+                          ? 'Printing Now' 
+                          : isPaid 
+                          ? 'Ready for Scan' 
+                          : isExpired 
+                          ? 'Session Expired' 
+                          : 'Payment Pending'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Connected Stepper Timeline with Guaranteed Non-Overflowing Flex Connectors */}
+                  <div className="pt-1.5 pb-1 space-y-2">
+                    <div className="flex items-center justify-between w-full px-5 sm:px-8">
+                      {/* Step 1 Node */}
+                      <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shrink-0 transition-all shadow-2xs ${
+                        isPaid || isDelivered 
+                          ? 'bg-emerald-500 text-white ring-3 ring-emerald-100' 
+                          : isExpired 
+                          ? 'bg-rose-500 text-white ring-3 ring-rose-100' 
+                          : 'bg-blue-600 text-white ring-3 ring-blue-100'
+                      }`}>
+                        {isPaid || isDelivered ? <Check className="w-3.5 h-3.5 stroke-[3]" /> : isExpired ? '✕' : '1'}
+                      </div>
+
+                      {/* Line 1 -> 2 */}
+                      <div className={`flex-1 h-1 mx-2 sm:mx-3 rounded-full transition-all duration-500 ${
+                        isPaid || isDelivered ? 'bg-emerald-500' : 'bg-slate-200'
+                      }`} />
+
+                      {/* Step 2 Node */}
+                      <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shrink-0 transition-all shadow-2xs ${
+                        isDelivered 
+                          ? 'bg-emerald-500 text-white ring-3 ring-emerald-100' 
+                          : isPrinting 
+                          ? 'bg-blue-600 text-white ring-3 ring-blue-100 animate-pulse' 
+                          : isPaid 
+                          ? 'bg-[#2563eb] text-white ring-3 ring-blue-100' 
+                          : 'bg-white border-2 border-slate-200 text-slate-400'
+                      }`}>
+                        {isDelivered ? <Check className="w-3.5 h-3.5 stroke-[3]" /> : isPrinting ? '⚡' : isPaid ? <QrCode className="w-3.5 h-3.5" /> : '2'}
+                      </div>
+
+                      {/* Line 2 -> 3 */}
+                      <div className={`flex-1 h-1 mx-2 sm:mx-3 rounded-full transition-all duration-500 ${
+                        isDelivered ? 'bg-emerald-500' : isPrinting ? 'bg-blue-500 animate-pulse' : 'bg-slate-200'
+                      }`} />
+
+                      {/* Step 3 Node */}
+                      <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shrink-0 transition-all shadow-2xs ${
+                        isDelivered 
+                          ? 'bg-emerald-500 text-white ring-3 ring-emerald-100' 
+                          : isPrinting 
+                          ? 'bg-blue-50 border-2 border-blue-400 text-blue-700 animate-pulse' 
+                          : 'bg-white border-2 border-slate-200 text-slate-400'
+                      }`}>
+                        {isDelivered ? <Check className="w-3.5 h-3.5 stroke-[3]" /> : isPrinting ? '🖨️' : '3'}
+                      </div>
+                    </div>
+
+                    {/* Step Labels */}
+                    <div className="grid grid-cols-3 text-center">
+                      <div>
+                        <p className="text-[11px] font-extrabold text-slate-900 leading-none">Payment</p>
+                        <p className={`mt-0.5 text-[10px] font-semibold ${
+                          isPaid || isDelivered ? 'text-emerald-700' : isExpired ? 'text-rose-600' : 'text-blue-700'
+                        }`}>
+                          {isPaid || isDelivered ? 'Verified ✓' : isExpired ? 'Timed Out' : 'Pending'}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-[11px] font-extrabold text-slate-900 leading-none">Kiosk Scan</p>
+                        <p className={`mt-0.5 text-[10px] font-semibold ${
+                          isDelivered ? 'text-emerald-700' : isPrinting ? 'text-blue-700' : isPaid ? 'text-[#2563eb]' : 'text-slate-400'
+                        }`}>
+                          {isDelivered ? 'Scanned ✓' : isPrinting ? 'In Progress' : isPaid ? 'Ready to Scan' : 'Waiting'}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-[11px] font-extrabold text-slate-900 leading-none">Print Pickup</p>
+                        <p className={`mt-0.5 text-[10px] font-semibold ${
+                          isDelivered ? 'text-emerald-700' : isPrinting ? 'text-blue-700' : 'text-slate-400'
+                        }`}>
+                          {isDelivered ? 'Collected 🎉' : isPrinting ? 'Printing' : 'In Queue'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Mobile Accordion Toggle Button (When Paid or Delivered) */}
+                {(isPaid || isDelivered) && (
+                  <div className="lg:hidden">
                     <button
                       type="button"
                       onClick={() => setShowDocDetails(!showDocDetails)}
-                      className="text-xs font-bold text-slate-500 hover:text-[#2563eb] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer"
+                      className="w-full py-2 px-3 rounded-xl bg-white border border-slate-200/90 text-xs font-bold text-slate-600 hover:text-slate-900 flex items-center justify-between transition-colors shadow-2xs cursor-pointer active:bg-slate-50"
                     >
-                      <span>{showDocDetails ? '▲ Hide Document Details' : '▼ View Full Document & Customer Details'}</span>
+                      <span className="flex items-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5 text-[#2563eb]" />
+                        <span>{showDocDetails ? 'Hide Document & Customer Details' : 'View Full Document & Customer Details'}</span>
+                      </span>
+                      <span className="text-slate-400 font-mono text-[11px]">{showDocDetails ? '▲' : '▼'}</span>
                     </button>
                   </div>
                 )}
 
                 {/* A. Unified Document & Specifications Card */}
-                <div className={`${isPaid && !showDocDetails ? 'hidden lg:block' : 'block'} rounded-2xl border border-slate-200/90 bg-white p-2.5 sm:p-3 shadow-xs space-y-2`}>
+                <div className={`${(isPaid || isDelivered) && !showDocDetails ? 'hidden lg:block' : 'block'} rounded-2xl border border-slate-200/90 bg-white p-2.5 sm:p-3 shadow-xs space-y-2`}>
                   {/* Top: File Info Row */}
                   <div className="flex items-center gap-2.5 border-b border-slate-100 pb-2">
                     <div className="w-8 h-8 rounded-lg bg-blue-50 text-[#2563eb] flex items-center justify-center font-bold border border-blue-100 shrink-0">
@@ -584,7 +706,7 @@ export default function PrintSummaryPage() {
                 </div>
 
                 {/* B. Dedicated Contact & Pickup User Card */}
-                <div className={`${isPaid && !showDocDetails ? 'hidden lg:block' : 'block'} rounded-2xl border border-slate-200/90 bg-white p-2 sm:p-2.5 shadow-xs`}>
+                <div className={`${(isPaid || isDelivered) && !showDocDetails ? 'hidden lg:block' : 'block'} rounded-2xl border border-slate-200/90 bg-white p-2 sm:p-2.5 shadow-xs`}>
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
                     {/* User Name */}
                     <div className="flex items-center gap-2 min-w-0">
@@ -621,123 +743,6 @@ export default function PrintSummaryPage() {
                   </div>
                 </div>
 
-                {/* C. Real Connected Campus Kiosk Pipeline Tracker */}
-                <div className="rounded-2xl border border-slate-200/90 bg-white p-2.5 sm:p-3 shadow-xs space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-800">
-                      Live Order Progress
-                    </span>
-
-                    {/* Active Status Pill */}
-                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200/70 text-[11px] font-bold font-mono text-slate-700">
-                      <span className={`w-1.5 h-1.5 rounded-full ${
-                        isDelivered 
-                          ? 'bg-emerald-500' 
-                          : isPrinting 
-                          ? 'bg-blue-600 animate-ping' 
-                          : isPaid 
-                          ? 'bg-blue-600 animate-pulse' 
-                          : isExpired 
-                          ? 'bg-rose-500' 
-                          : 'bg-amber-500 animate-pulse'
-                      }`} />
-                      <span>
-                        {isDelivered 
-                          ? 'Completed' 
-                          : isPrinting 
-                          ? 'Printing Now' 
-                          : isPaid 
-                          ? 'Ready for Scan' 
-                          : isExpired 
-                          ? 'Session Expired' 
-                          : 'Payment Pending'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Connected Stepper Timeline */}
-                  <div className="relative pt-1 pb-0.5">
-                    {/* Background Connecting Track Line */}
-                    <div className="absolute top-[18px] left-8 right-8 h-1 bg-slate-100 rounded-full z-0" />
-                    
-                    {/* Active Gradient Fill Progress Line */}
-                    <div 
-                      className="absolute top-[18px] left-8 h-1 bg-gradient-to-r from-emerald-500 to-[#2563eb] rounded-full transition-all duration-500 z-0" 
-                      style={{
-                        width: isDelivered 
-                          ? 'calc(100% - 64px)' 
-                          : isPrinting 
-                          ? 'calc(75% - 48px)' 
-                          : isPaid 
-                          ? 'calc(50% - 32px)' 
-                          : '0%'
-                      }}
-                    />
-
-                    {/* 3 Step Milestone Nodes */}
-                    <div className="relative z-10 grid grid-cols-3 text-center">
-                      {/* Step 1: Payment */}
-                      <div className="flex flex-col items-center">
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[10px] transition-all shadow-2xs ${
-                          isPaid || isDelivered 
-                            ? 'bg-emerald-500 text-white ring-3 ring-emerald-50' 
-                            : isExpired 
-                            ? 'bg-rose-500 text-white ring-3 ring-rose-50' 
-                            : 'bg-blue-600 text-white ring-3 ring-blue-50'
-                        }`}>
-                          {isPaid || isDelivered ? <Check className="w-3 h-3 stroke-[3]" /> : isExpired ? '✕' : '1'}
-                        </div>
-                        <p className="mt-1 text-[11px] font-extrabold text-slate-900 leading-none">Payment</p>
-                        <p className={`mt-0.5 text-[9px] font-semibold ${
-                          isPaid || isDelivered ? 'text-emerald-700' : isExpired ? 'text-rose-600' : 'text-blue-700'
-                        }`}>
-                          {isPaid || isDelivered ? 'Verified ✓' : isExpired ? 'Timed Out' : 'Pending'}
-                        </p>
-                      </div>
-
-                      {/* Step 2: Kiosk Scan */}
-                      <div className="flex flex-col items-center">
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[10px] transition-all shadow-2xs ${
-                          isDelivered 
-                            ? 'bg-emerald-500 text-white ring-3 ring-emerald-50' 
-                            : isPrinting 
-                            ? 'bg-blue-600 text-white ring-3 ring-blue-100 animate-pulse' 
-                            : isPaid 
-                            ? 'bg-[#2563eb] text-white ring-3 ring-blue-100' 
-                            : 'bg-white border-2 border-slate-200 text-slate-400'
-                        }`}>
-                          {isDelivered ? <Check className="w-3 h-3 stroke-[3]" /> : isPrinting ? '⚡' : isPaid ? <QrCode className="w-3 h-3" /> : '2'}
-                        </div>
-                        <p className="mt-1 text-[11px] font-extrabold text-slate-900 leading-none">Kiosk Scan</p>
-                        <p className={`mt-0.5 text-[9px] font-semibold ${
-                          isDelivered ? 'text-emerald-700' : isPrinting ? 'text-blue-700' : isPaid ? 'text-[#2563eb]' : 'text-slate-400'
-                        }`}>
-                          {isDelivered ? 'Scanned ✓' : isPrinting ? 'In Progress' : isPaid ? 'Ready to Scan' : 'Waiting'}
-                        </p>
-                      </div>
-
-                      {/* Step 3: Print Delivery */}
-                      <div className="flex flex-col items-center">
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[10px] transition-all shadow-2xs ${
-                          isDelivered 
-                            ? 'bg-emerald-500 text-white ring-3 ring-emerald-50' 
-                            : isPrinting 
-                            ? 'bg-blue-50 border-2 border-blue-400 text-blue-700 animate-pulse' 
-                            : 'bg-white border-2 border-slate-200 text-slate-400'
-                        }`}>
-                          {isDelivered ? <Check className="w-3 h-3 stroke-[3]" /> : isPrinting ? '🖨️' : '3'}
-                        </div>
-                        <p className="mt-1 text-[11px] font-extrabold text-slate-900 leading-none">Print Pickup</p>
-                        <p className={`mt-0.5 text-[9px] font-semibold ${
-                          isDelivered ? 'text-emerald-700' : isPrinting ? 'text-blue-700' : 'text-slate-400'
-                        }`}>
-                          {isDelivered ? 'Collected 🎉' : isPrinting ? 'Printing' : 'In Queue'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
                 {/* Minimalist Trust & Privacy Note */}
                 <div className="flex items-center justify-center gap-1.5 py-0.5 text-[10px] text-slate-500 text-center">
                   <ShieldCheck className={`w-3.5 h-3.5 shrink-0 ${isDelivered ? 'text-emerald-600' : isExpired ? 'text-rose-500' : 'text-[#2563eb]'}`} />
@@ -759,59 +764,59 @@ export default function PrintSummaryPage() {
                 {/* STATE A: DELIVERED & COLLECTED SUCCESS CARD */}
                 {isDelivered ? (
                   <div className="rounded-2xl border-2 border-emerald-300 bg-gradient-to-b from-white via-emerald-50/30 to-emerald-50/70 p-4 sm:p-5 text-slate-900 shadow-xs space-y-3 flex-1 flex flex-col justify-between text-center animate-fade-in">
-                    <div className="space-y-2.5 pt-1">
+                    <div className="space-y-2.5 pt-0.5">
                       <div className="relative inline-flex items-center justify-center">
-                        <div className="w-14 h-14 rounded-2xl bg-emerald-500 text-white flex items-center justify-center shadow-md shadow-emerald-500/30 mx-auto">
-                          <CheckCircle2 className="w-8 h-8 stroke-[2.5]" />
+                        <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-emerald-500 text-white flex items-center justify-center shadow-md shadow-emerald-500/30 mx-auto">
+                          <CheckCircle2 className="w-7 h-7 sm:w-8 sm:h-8 stroke-[2.5]" />
                         </div>
                       </div>
 
-                      <div className="space-y-0.5">
+                      <div className="space-y-1">
                         <h2 className="text-lg sm:text-xl font-black text-slate-900">
                           Print Job Completed!
                         </h2>
                         <p className="text-xs font-semibold text-emerald-800 max-w-sm mx-auto">
-                          Your document was successfully printed and collected at <strong>{order.machineName || order.machineCode || 'RIT-ATM-01'}</strong>.
+                          Your document was successfully printed and collected at <span className="font-extrabold text-slate-900">{order.machineName || order.machineCode || 'Print ATM – Main Campus Hub'}</span>.
                         </p>
                       </div>
 
                       {/* Delivery Verification Pill */}
-                      <div className="p-2.5 rounded-xl bg-white border border-emerald-200 text-left space-y-1 text-xs shadow-2xs">
-                        <div className="flex justify-between">
-                          <span className="font-semibold text-slate-600">Dispense Status:</span>
-                          <span className="font-black text-emerald-700">Dispensed Into Output Tray</span>
+                      <div className="p-2.5 sm:p-3 rounded-xl bg-white border border-emerald-200 text-left divide-y divide-emerald-100/80 text-xs shadow-2xs">
+                        <div className="pb-1.5 flex items-center justify-between gap-2">
+                          <span className="font-semibold text-slate-600 text-[11px] sm:text-xs shrink-0">Dispense Status:</span>
+                          <span className="font-extrabold text-emerald-700 text-[11px] sm:text-xs text-right">Dispensed to Output Tray ✓</span>
                         </div>
-                        <div className="flex justify-between">
-                          <span className="font-semibold text-slate-600">Total Sheets:</span>
-                          <span className="font-bold text-slate-900 font-mono">{order.calculatedSheets || 1} A4 Sheets</span>
+                        <div className="py-1.5 flex items-center justify-between gap-2">
+                          <span className="font-semibold text-slate-600 text-[11px] sm:text-xs shrink-0">Total Sheets:</span>
+                          <span className="font-bold text-slate-900 font-mono text-[11px] sm:text-xs text-right">{order.calculatedSheets || 1} A4 Sheets</span>
                         </div>
-                        <div className="flex justify-between">
-                          <span className="font-semibold text-slate-600">Security Wipe:</span>
-                          <span className="font-bold text-blue-700">AES-256 Vault Zero-Wiped</span>
+                        <div className="pt-1.5 flex items-center justify-between gap-2">
+                          <span className="font-semibold text-slate-600 text-[11px] sm:text-xs shrink-0">Security Wipe:</span>
+                          <span className="font-bold text-blue-700 text-[11px] sm:text-xs text-right">AES-256 Cloud Shredded</span>
                         </div>
                       </div>
                     </div>
 
                     {/* Bottom Actions for Completed State */}
-                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-emerald-200/80">
+                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-emerald-200/80">
                       <button
                         type="button"
                         onClick={() => {
                           sounds.keyPress();
                           setShowReceiptModal(true);
                         }}
-                        className="py-2 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        className="h-10 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-98"
                       >
-                        <Receipt className="w-3.5 h-3.5 text-blue-400" />
-                        <span>View Receipt</span>
+                        <Receipt className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                        <span className="whitespace-nowrap">View Receipt</span>
                       </button>
 
                       <Link
                         href="/upload?new=true"
-                        className="py-2 px-3 rounded-xl btn-primary-glow text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        className="h-10 px-3 rounded-xl btn-primary-glow text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-98"
                       >
-                        <FileText className="w-3.5 h-3.5" />
-                        <span>Print Another</span>
+                        <FileText className="w-3.5 h-3.5 shrink-0" />
+                        <span className="whitespace-nowrap">Print Another</span>
                       </Link>
                     </div>
                   </div>

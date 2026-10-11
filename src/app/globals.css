@@ -29,14 +29,24 @@ body {
   letter-spacing: -0.02em;
   overflow-x: hidden;
   max-width: 100vw;
+  -webkit-overflow-scrolling: touch;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── Content Visibility for Buttery Smooth 60/120fps Mobile Scrolling ── */
+.scroll-section {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 600px;
 }
 
 /* ── Smooth Scroll Reveal Transitions ── */
 .reveal-on-scroll {
-  opacity: 0;
-  transform: translateY(28px);
-  transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: opacity, transform;
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .reveal-on-scroll.is-revealed {
@@ -44,16 +54,15 @@ body {
   transform: translateY(0);
 }
 
-/* ── 2030 Pure White & Royal Blue Cyber Grid ── */
+/* ── Lightweight 2030 Cyber Grid (GPU Optimized) ── */
 .bg-futuristic-grid {
   background-color: #f8fafc;
   background-image: 
-    radial-gradient(circle at 50% -20%, rgba(37, 99, 235, 0.12) 0%, transparent 60%),
-    radial-gradient(circle at 100% 40%, rgba(2, 132, 199, 0.08) 0%, transparent 45%),
-    radial-gradient(circle at 0% 80%, rgba(37, 99, 235, 0.06) 0%, transparent 40%),
-    linear-gradient(rgba(37, 99, 235, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(37, 99, 235, 0.04) 1px, transparent 1px);
-  background-size: 100% 100%, 100% 100%, 100% 100%, 48px 48px, 48px 48px;
+    radial-gradient(circle at 50% 0%, rgba(37, 99, 235, 0.08) 0%, transparent 600px),
+    linear-gradient(rgba(37, 99, 235, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(37, 99, 235, 0.03) 1px, transparent 1px);
+  background-size: 100% 600px, 48px 48px, 48px 48px;
+  background-repeat: no-repeat, repeat, repeat;
 }
 
 /* ── Glassmorphic Crisp White Panels ── */
@@ -166,27 +175,29 @@ body {
   animation: holo-glow 4s ease-in-out infinite;
 }
 
-/* ── Live Telemetry & Criss-Cross Marquee ── */
+/* ── Live Telemetry & Criss-Cross Marquee (GPU Accelerated) ── */
 @keyframes marquee {
-  0% { transform: translateX(0%); }
-  100% { transform: translateX(-50%); }
+  0% { transform: translate3d(0%, 0, 0); }
+  100% { transform: translate3d(-50%, 0, 0); }
 }
 
 @keyframes marquee-reverse {
-  0% { transform: translateX(-50%); }
-  100% { transform: translateX(0%); }
+  0% { transform: translate3d(-50%, 0, 0); }
+  100% { transform: translate3d(0%, 0, 0); }
 }
 
 .animate-marquee {
   display: flex;
   width: max-content;
-  animation: marquee 12s linear infinite;
+  animation: marquee 16s linear infinite;
+  will-change: transform;
 }
 
 .animate-marquee-reverse {
   display: flex;
   width: max-content;
-  animation: marquee-reverse 12s linear infinite;
+  animation: marquee-reverse 16s linear infinite;
+  will-change: transform;
 }
 
 .animate-marquee:hover,
