@@ -8,9 +8,9 @@ interface LogoProps {
 
 export default function Logo({ size = 'md', className = '' }: LogoProps) {
   const sizes = {
-    sm: { imgHClass: 'h-5 sm:h-6 max-w-[75px] sm:max-w-[90px]', font: 'text-xs sm:text-sm' },
-    md: { imgHClass: 'h-5 xs:h-6 sm:h-8 max-w-[80px] xs:max-w-[120px] sm:max-w-none', font: 'text-xs xs:text-sm sm:text-base' },
-    lg: { imgHClass: 'h-7 sm:h-10 max-w-[100px] sm:max-w-none', font: 'text-base sm:text-xl' },
+    sm: { imgHClass: 'h-[18px] sm:h-[22px]', font: 'text-xs sm:text-sm' },
+    md: { imgHClass: 'h-[20px] sm:h-[26px]', font: 'text-xs sm:text-base' },
+    lg: { imgHClass: 'h-[26px] sm:h-[32px]', font: 'text-sm sm:text-lg' },
   };
 
   const s = sizes[size];
@@ -18,15 +18,15 @@ export default function Logo({ size = 'md', className = '' }: LogoProps) {
   return (
     <Link href="/" className={`inline-flex items-center shrink-0 whitespace-nowrap select-none group ${className}`}>
       <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-2xl bg-white border border-slate-200/90 shadow-2xs hover:border-blue-500/40 hover:shadow-xs transition-all duration-200 shrink-0">
-        {/* Official College Crest Image */}
+        {/* Official College Crest Image (Clean High-DPI Emblem) */}
         <img
-          src="/rit-logo.png"
+          src="/rit-emblem.png"
           alt="Rajalakshmi Institute of Technology"
           className={`${s.imgHClass} w-auto object-contain block shrink-0`}
         />
         
         {/* Vertical Divider Line */}
-        <div className="h-4 sm:h-5 w-px bg-slate-200 shrink-0" />
+        <div className="h-3.5 sm:h-4.5 w-px bg-slate-200 shrink-0" />
         
         {/* SmartPrint Brand Text + Royal Blue Pulsing Dot */}
         <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 whitespace-nowrap">

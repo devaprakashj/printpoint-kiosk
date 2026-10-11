@@ -98,7 +98,7 @@ export default function WhiteAndBlueLandingPage() {
 
       {/* ── FLOATING PILL NAVIGATION (CENTERED LOGO MATCHING REFERENCE) ── */}
       <div className="sticky top-2 sm:top-5 z-50 max-w-5xl mx-auto px-2 xs:px-4 sm:px-6">
-        <header className="rounded-full bg-white/95 backdrop-blur-md px-3 xs:px-4 sm:px-8 py-2 sm:py-3 flex items-center justify-between border border-slate-200/90 shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-all duration-300">
+        <header className="rounded-full bg-white/95 backdrop-blur-md px-2.5 xs:px-4 sm:px-8 py-1.5 xs:py-2 sm:py-3 flex items-center justify-between border border-slate-200/90 shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-all duration-300">
           
           {/* Left Nav Links (Desktop) */}
           <nav className="hidden md:flex items-center gap-6 lg:gap-8 text-xs sm:text-sm font-bold text-slate-800">
@@ -116,7 +116,7 @@ export default function WhiteAndBlueLandingPage() {
           </div>
 
           {/* Right Nav Links & CTA Action */}
-          <div className="flex items-center gap-2 sm:gap-6 lg:gap-8 shrink-0">
+          <div className="flex items-center gap-1.5 xs:gap-2 sm:gap-6 lg:gap-8 shrink-0">
             <nav className="hidden md:flex items-center gap-6 lg:gap-8 text-xs sm:text-sm font-bold text-slate-800">
               <a href="#comparison" className="hover:text-[#2563eb] transition-colors">
                 Comparison
@@ -128,7 +128,7 @@ export default function WhiteAndBlueLandingPage() {
 
             <Link
               href="/upload"
-              className="px-3 xs:px-4 sm:px-6 py-1.5 xs:py-2 sm:py-2.5 rounded-full bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-extrabold text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2 shadow-md shadow-blue-500/25 active:scale-95 transition-all shrink-0"
+              className="px-2.5 xs:px-4 sm:px-6 py-1.5 xs:py-2 sm:py-2.5 rounded-full bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-extrabold text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2 shadow-md shadow-blue-500/25 active:scale-95 transition-all shrink-0"
             >
               <UploadCloud className="w-3.5 sm:w-4 h-3.5 sm:h-4 stroke-[2.5]" />
               <span className="hidden xs:inline">Print Document</span>
@@ -178,7 +178,7 @@ export default function WhiteAndBlueLandingPage() {
             </h1>
 
             {/* Hero Actions (Clean Pill Buttons with Balanced Alignment) */}
-            <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-2.5 sm:gap-4 px-2 w-full max-w-lg mx-auto">
+            <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-2.5 sm:gap-4 px-2 w-full max-w-xs sm:max-w-lg mx-auto">
               <Link
                 href="/upload"
                 className="w-full sm:w-auto px-5 sm:px-8 py-3 sm:py-4 rounded-full bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-extrabold text-xs xs:text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 hover:shadow-blue-600/35 active:scale-98 transition-all whitespace-nowrap"
@@ -197,7 +197,7 @@ export default function WhiteAndBlueLandingPage() {
             </div>
 
             {/* Micro Feature Metric Pills */}
-            <div className="pt-2 sm:pt-4 flex items-center justify-center gap-1.5 xs:gap-2 sm:gap-4 flex-wrap text-[9px] xs:text-[10px] sm:text-xs font-bold text-slate-700 font-mono">
+            <div className="pt-1.5 sm:pt-4 flex items-center justify-center gap-1.5 xs:gap-2 sm:gap-4 flex-wrap text-[8.5px] xs:text-[10px] sm:text-xs font-bold text-slate-700 font-mono">
               <span className="glass-pill px-2.5 xs:px-3 py-1 rounded-full flex items-center gap-1.5 border border-slate-200 shadow-2xs">
                 <Zap className="w-3 h-3 text-[#2563eb]" />
                 <span>30-SEC LASER FUSION</span>
@@ -216,11 +216,11 @@ export default function WhiteAndBlueLandingPage() {
         </div>
       </section>
 
-      {/* ── PRONOUNCED X-CRISS-CROSS ANGLED RUNNING MARQUEE RIBBONS ── */}
-      <div className="relative py-10 sm:py-20 overflow-hidden w-full select-none my-4 sm:my-10 flex items-center justify-center min-h-[140px] sm:min-h-[220px] max-w-[100vw]">
+      {/* ── RUNNING MARQUEE RIBBONS (SLICK FULL WIDTH ON MOBILE, DYNAMIC ANGLED ON DESKTOP) ── */}
+      <div className="relative py-3 sm:py-20 overflow-hidden w-full select-none my-2 sm:my-10 flex items-center justify-center min-h-[50px] sm:min-h-[220px] max-w-full">
         
-        {/* White Ribbon (Angled Upwards +4.5deg) */}
-        <div className="absolute w-[200%] sm:w-[150%] -left-[50%] sm:-left-[25%] py-3.5 sm:py-5 bg-white/95 backdrop-blur-md border-y border-slate-200/90 shadow-md transform rotate-[4.5deg] overflow-hidden flex items-center z-10">
+        {/* White Ribbon (Angled Upwards +4.5deg on Desktop, hidden on mobile for clean look) */}
+        <div className="hidden sm:flex absolute w-[150%] -left-[25%] py-3.5 sm:py-5 bg-white/95 backdrop-blur-md border-y border-slate-200/90 shadow-md transform rotate-[4.5deg] overflow-hidden items-center z-10">
           <div className="animate-marquee gap-8 sm:gap-14 text-sm sm:text-base font-bold text-slate-800 tracking-wide font-sans">
             <div className="flex items-center gap-6 sm:gap-8 shrink-0">
               <span>No Queues</span> <span className="text-[#2563eb] text-base">✦</span>
@@ -247,30 +247,28 @@ export default function WhiteAndBlueLandingPage() {
           </div>
         </div>
 
-        {/* Foreground Royal Blue Ribbon (Angled Downwards -4.5deg Crossing Over) */}
-        <div className="absolute w-[200%] sm:w-[150%] -left-[50%] sm:-left-[25%] py-3.5 sm:py-5.5 bg-gradient-to-r from-[#2563eb] via-[#1d4ed8] to-[#2563eb] text-white shadow-2xl transform -rotate-[4.5deg] overflow-hidden flex items-center z-20">
-          <div className="animate-marquee-reverse gap-8 sm:gap-14 text-sm sm:text-base font-black text-white tracking-wide font-sans">
-            <div className="flex items-center gap-6 sm:gap-8 shrink-0">
-              <span>Smart Printing</span> <span className="text-white/80 text-base">✦</span>
-              <span>24/7 Service</span> <span className="text-white/80 text-base">✦</span>
-              <span>Encrypted Files</span> <span className="text-white/80 text-base">✦</span>
-              <span>Smart Printing</span> <span className="text-white/80 text-base">✦</span>
-              <span>24/7 Service</span> <span className="text-white/80 text-base">✦</span>
-              <span>Encrypted Files</span> <span className="text-white/80 text-base">✦</span>
-              <span>Smart Printing</span> <span className="text-white/80 text-base">✦</span>
-              <span>24/7 Service</span> <span className="text-white/80 text-base">✦</span>
-              <span>Encrypted Files</span> <span className="text-white/80 text-base">✦</span>
+        {/* Royal Blue Ribbon (Horizontal on Mobile, Angled Downwards -4.5deg on Desktop) */}
+        <div className="absolute w-[200%] sm:w-[150%] -left-[50%] sm:-left-[25%] py-2.5 sm:py-5.5 bg-gradient-to-r from-[#2563eb] via-[#1d4ed8] to-[#2563eb] text-white shadow-lg sm:shadow-2xl transform rotate-0 sm:-rotate-[4.5deg] overflow-hidden flex items-center z-20">
+          <div className="animate-marquee-reverse gap-6 sm:gap-14 text-xs sm:text-base font-black text-white tracking-wide font-sans">
+            <div className="flex items-center gap-4 sm:gap-8 shrink-0">
+              <span>Smart Printing</span> <span className="text-white/80 text-xs sm:text-base">✦</span>
+              <span>24/7 Service</span> <span className="text-white/80 text-xs sm:text-base">✦</span>
+              <span>Encrypted Files</span> <span className="text-white/80 text-xs sm:text-base">✦</span>
+              <span>Instant Laser Output</span> <span className="text-white/80 text-xs sm:text-base">✦</span>
+              <span>Smart Printing</span> <span className="text-white/80 text-xs sm:text-base">✦</span>
+              <span>24/7 Service</span> <span className="text-white/80 text-xs sm:text-base">✦</span>
+              <span>Encrypted Files</span> <span className="text-white/80 text-xs sm:text-base">✦</span>
+              <span>Instant Laser Output</span> <span className="text-white/80 text-xs sm:text-base">✦</span>
             </div>
-            <div className="flex items-center gap-6 sm:gap-8 shrink-0">
-              <span>Smart Printing</span> <span className="text-white/80 text-base">✦</span>
-              <span>24/7 Service</span> <span className="text-white/80 text-base">✦</span>
-              <span>Encrypted Files</span> <span className="text-white/80 text-base">✦</span>
-              <span>Smart Printing</span> <span className="text-white/80 text-base">✦</span>
-              <span>24/7 Service</span> <span className="text-white/80 text-base">✦</span>
-              <span>Encrypted Files</span> <span className="text-white/80 text-base">✦</span>
-              <span>Smart Printing</span> <span className="text-white/80 text-base">✦</span>
-              <span>24/7 Service</span> <span className="text-white/80 text-base">✦</span>
-              <span>Encrypted Files</span> <span className="text-white/80 text-base">✦</span>
+            <div className="flex items-center gap-4 sm:gap-8 shrink-0">
+              <span>Smart Printing</span> <span className="text-white/80 text-xs sm:text-base">✦</span>
+              <span>24/7 Service</span> <span className="text-white/80 text-xs sm:text-base">✦</span>
+              <span>Encrypted Files</span> <span className="text-white/80 text-xs sm:text-base">✦</span>
+              <span>Instant Laser Output</span> <span className="text-white/80 text-xs sm:text-base">✦</span>
+              <span>Smart Printing</span> <span className="text-white/80 text-xs sm:text-base">✦</span>
+              <span>24/7 Service</span> <span className="text-white/80 text-xs sm:text-base">✦</span>
+              <span>Encrypted Files</span> <span className="text-white/80 text-xs sm:text-base">✦</span>
+              <span>Instant Laser Output</span> <span className="text-white/80 text-xs sm:text-base">✦</span>
             </div>
           </div>
         </div>
@@ -356,7 +354,7 @@ export default function WhiteAndBlueLandingPage() {
                     {/* App Header: Logo + Help Button */}
                     <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-200/80 bg-blue-50/40">
                       <div className="flex items-center gap-1.5">
-                        <img src="/rit-logo.png" alt="RIT" className="h-4 w-auto object-contain max-w-[75px]" />
+                        <img src="/rit-emblem.png" alt="RIT" className="h-3.5 w-auto object-contain shrink-0" />
                         <span className="text-[11px] font-black text-slate-900 tracking-tight">
                           Smart<span className="text-[#2563eb]">Print</span>
                         </span>
@@ -848,7 +846,7 @@ export default function WhiteAndBlueLandingPage() {
                     {/* App Header: Logo + Help Button */}
                     <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-200/80 bg-blue-50/40">
                       <div className="flex items-center gap-1.5">
-                        <img src="/rit-logo.png" alt="RIT" className="h-4 w-auto object-contain max-w-[75px]" />
+                        <img src="/rit-emblem.png" alt="RIT" className="h-3.5 w-auto object-contain shrink-0" />
                         <span className="text-[11px] font-black text-slate-900 tracking-tight">
                           Smart<span className="text-[#2563eb]">Print</span>
                         </span>
@@ -1172,9 +1170,9 @@ export default function WhiteAndBlueLandingPage() {
                 <div className="flex flex-wrap sm:flex-nowrap items-center justify-between pb-4 sm:pb-5 border-b border-blue-500/20 mb-4 sm:mb-6 gap-2">
                   <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
                     <img
-                      src="/rit-logo.png"
+                      src="/rit-emblem.png"
                       alt="Rajalakshmi Institute of Technology"
-                      className="h-5 xs:h-6 sm:h-7 w-auto max-w-[80px] xs:max-w-[90px] sm:max-w-[100px] object-contain block shrink-0"
+                      className="h-5 xs:h-6 sm:h-7 w-auto object-contain block shrink-0"
                     />
                     <div className="h-4 w-px bg-blue-500/30 shrink-0" />
                     <div className="flex items-center gap-1 shrink-0 whitespace-nowrap">

@@ -1505,28 +1505,28 @@ export default function QwikprintAuthenticApp() {
       />
 
       {/* ================= TOP NAVIGATION BAR (Clean Header with PrintIt Logo & Location) ================= */}
-      <header className="px-4 py-2 sm:py-2.5 sm:px-8 max-w-7xl mx-auto w-full flex items-center justify-between shrink-0">
+      <header className="px-3 xs:px-4 py-2 sm:py-2.5 sm:px-8 max-w-7xl mx-auto w-full flex items-center justify-between shrink-0 gap-2">
         {/* Brand Logo & Location Dropdown */}
-        <div className="flex items-center gap-3 sm:gap-4">
+        <div className="flex items-center gap-2 sm:gap-4 min-w-0">
           <Logo size="sm" />
 
-          <span className="hidden sm:inline-block w-px h-5 bg-slate-200" />
+          <span className="hidden sm:inline-block w-px h-5 bg-slate-200 shrink-0" />
 
           {/* Location Dropdown */}
-          <div className="relative">
+          <div className="relative min-w-0">
             <button
               type="button"
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              className="flex items-center gap-1.5 text-left group cursor-pointer"
+              className="flex items-center gap-1.5 text-left group cursor-pointer min-w-0"
             >
-              <div>
-                <div className="flex items-center gap-1">
-                  <span className="font-bold text-xs sm:text-sm text-slate-900 group-hover:text-[#2563eb] transition-colors">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1 min-w-0">
+                  <span className="font-bold text-xs sm:text-sm text-slate-900 group-hover:text-[#2563eb] transition-colors truncate max-w-[130px] xs:max-w-[200px] sm:max-w-none block">
                     {currentMachine?.displayName || 'Library Ground Floor Kiosk 01'}
                   </span>
-                  <ChevronDown className="h-3.5 w-3.5 text-slate-600 group-hover:text-[#2563eb]" />
+                  <ChevronDown className="h-3.5 w-3.5 text-slate-600 group-hover:text-[#2563eb] shrink-0" />
                 </div>
-                <p className="text-[10px] sm:text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                <p className="hidden sm:block text-[10px] sm:text-[11px] font-semibold text-slate-500 uppercase tracking-wider truncate">
                   {currentMachine?.organizationName || 'RIT CHENNAI'}
                 </p>
               </div>
@@ -1637,19 +1637,19 @@ export default function QwikprintAuthenticApp() {
               {/* Main Document Dropzone (Spans 8 cols on desktop) */}
               <div className="md:col-span-8 rounded-3xl border border-slate-200/90 bg-white p-5 sm:p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col justify-between space-y-4 hover:border-blue-300 transition-all">
                 {/* Header Strip */}
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                  <div className="flex items-center gap-2.5">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 gap-2">
+                  <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
                     <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-                    <div>
-                      <h2 className="text-sm sm:text-base font-black text-slate-900 leading-none">
+                    <div className="min-w-0">
+                      <h2 className="text-xs xs:text-sm sm:text-base font-black text-slate-900 leading-tight">
                         Upload Documents for Instant Laser Print
                       </h2>
-                      <p className="text-[11px] text-slate-400 font-medium mt-1">
+                      <p className="text-[10px] xs:text-[11px] text-slate-400 font-medium mt-0.5">
                         Zero-wait cloud dispatch • Auto-scaled for standard A4
                       </p>
                     </div>
                   </div>
-                  <span className="px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200/80 font-mono text-xs font-bold shrink-0">
+                  <span className="px-2.5 xs:px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200/80 font-mono text-[10px] xs:text-xs font-bold shrink-0 whitespace-nowrap">
                     From ₹2 / pg
                   </span>
                 </div>
