@@ -140,55 +140,64 @@ export default function WhiteAndBlueLandingPage() {
           </div>
         </header>
 
-        {/* Mobile Dropdown Menu Drawer */}
+        {/* Mobile Dropdown Menu Drawer (Floating Overlay - Does NOT push page content down!) */}
         {mobileMenuOpen && (
-          <div className="md:hidden mt-2 bg-white/98 backdrop-blur-xl rounded-3xl p-4 sm:p-5 space-y-3 shadow-2xl border border-slate-200 animate-fade-in w-full max-w-md mx-auto">
-            <nav className="flex flex-col space-y-1 text-sm font-bold text-slate-800">
-              <a 
-                href="#how-it-works" 
-                onClick={() => setMobileMenuOpen(false)} 
-                className="px-3.5 py-2.5 rounded-2xl hover:bg-blue-50 hover:text-[#2563eb] transition-colors flex items-center justify-between"
-              >
-                <span>How It Works</span>
-                <span className="text-slate-400 text-xs">→</span>
-              </a>
-              <a 
-                href="#features" 
-                onClick={() => setMobileMenuOpen(false)} 
-                className="px-3.5 py-2.5 rounded-2xl hover:bg-blue-50 hover:text-[#2563eb] transition-colors flex items-center justify-between"
-              >
-                <span>Why SmartPrint (Features)</span>
-                <span className="text-slate-400 text-xs">→</span>
-              </a>
-              <a 
-                href="#comparison" 
-                onClick={() => setMobileMenuOpen(false)} 
-                className="px-3.5 py-2.5 rounded-2xl hover:bg-blue-50 hover:text-[#2563eb] transition-colors flex items-center justify-between"
-              >
-                <span>Smarter vs Traditional</span>
-                <span className="text-slate-400 text-xs">→</span>
-              </a>
-              <a 
-                href="#faq" 
-                onClick={() => setMobileMenuOpen(false)} 
-                className="px-3.5 py-2.5 rounded-2xl hover:bg-blue-50 hover:text-[#2563eb] transition-colors flex items-center justify-between"
-              >
-                <span>FAQ &amp; Support</span>
-                <span className="text-slate-400 text-xs">→</span>
-              </a>
-            </nav>
+          <>
+            {/* Click-outside backdrop to dismiss */}
+            <div 
+              className="fixed inset-0 bg-slate-900/25 backdrop-blur-xs z-40 md:hidden" 
+              onClick={() => setMobileMenuOpen(false)} 
+            />
 
-            <div className="pt-2 border-t border-slate-100 flex flex-col gap-2">
-              <Link 
-                href="/upload" 
-                onClick={() => setMobileMenuOpen(false)} 
-                className="w-full py-3.5 rounded-full bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-center font-extrabold text-xs shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2 transition-all active:scale-98"
-              >
-                <UploadCloud className="w-4 h-4 stroke-[2.5]" />
-                <span>Upload &amp; Print Document</span>
-              </Link>
+            {/* Absolute floating card overlay directly below header */}
+            <div className="md:hidden absolute top-full left-2 right-2 xs:left-4 xs:right-4 mt-2 bg-white/98 backdrop-blur-xl rounded-3xl p-4 sm:p-5 space-y-3 shadow-2xl border border-slate-200/90 animate-fade-in z-50 max-w-md mx-auto">
+              <nav className="flex flex-col space-y-1 text-sm font-bold text-slate-800">
+                <a 
+                  href="#how-it-works" 
+                  onClick={() => setMobileMenuOpen(false)} 
+                  className="px-3.5 py-2.5 rounded-2xl hover:bg-blue-50 hover:text-[#2563eb] transition-colors flex items-center justify-between"
+                >
+                  <span>How It Works</span>
+                  <span className="text-slate-400 text-xs">→</span>
+                </a>
+                <a 
+                  href="#features" 
+                  onClick={() => setMobileMenuOpen(false)} 
+                  className="px-3.5 py-2.5 rounded-2xl hover:bg-blue-50 hover:text-[#2563eb] transition-colors flex items-center justify-between"
+                >
+                  <span>Why SmartPrint (Features)</span>
+                  <span className="text-slate-400 text-xs">→</span>
+                </a>
+                <a 
+                  href="#comparison" 
+                  onClick={() => setMobileMenuOpen(false)} 
+                  className="px-3.5 py-2.5 rounded-2xl hover:bg-blue-50 hover:text-[#2563eb] transition-colors flex items-center justify-between"
+                >
+                  <span>Smarter vs Traditional</span>
+                  <span className="text-slate-400 text-xs">→</span>
+                </a>
+                <a 
+                  href="#faq" 
+                  onClick={() => setMobileMenuOpen(false)} 
+                  className="px-3.5 py-2.5 rounded-2xl hover:bg-blue-50 hover:text-[#2563eb] transition-colors flex items-center justify-between"
+                >
+                  <span>FAQ &amp; Support</span>
+                  <span className="text-slate-400 text-xs">→</span>
+                </a>
+              </nav>
+
+              <div className="pt-2 border-t border-slate-100 flex flex-col gap-2">
+                <Link 
+                  href="/upload" 
+                  onClick={() => setMobileMenuOpen(false)} 
+                  className="w-full py-3.5 rounded-full bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-center font-extrabold text-xs shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2 transition-all active:scale-98"
+                >
+                  <UploadCloud className="w-4 h-4 stroke-[2.5]" />
+                  <span>Upload &amp; Print Document</span>
+                </Link>
+              </div>
             </div>
-          </div>
+          </>
         )}
       </div>
 
