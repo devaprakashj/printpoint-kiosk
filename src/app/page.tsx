@@ -202,7 +202,7 @@ export default function WhiteAndBlueLandingPage() {
       </div>
 
       {/* ── HERO SECTION (MATCHING REFERENCE IN HIGH CONTRAST & ROYAL BLUE) ── */}
-      <section className="relative pt-6 sm:pt-14 pb-10 sm:pb-24 overflow-hidden reveal-on-scroll is-revealed">
+      <section className="relative pt-12 xs:pt-14 sm:pt-20 pb-10 sm:pb-24 overflow-hidden reveal-on-scroll is-revealed">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 sm:space-y-8">
           
           {/* Main Hero Header */}
