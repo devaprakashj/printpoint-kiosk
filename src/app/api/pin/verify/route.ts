@@ -119,11 +119,41 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // STRICT HARDWARE GUARD: Check physical paper stock before permitting print execution
+    // STRICT HARDWARE GUARD: Check physical paper stock, online status & capability before permitting print execution
     if (machine) {
+      const machineName = machine.display_name || machine.displayName || machineCode;
+      const status = machine.status || 'online';
+
+      // 1. Machine Status Check
+      if (status === 'offline' || status === 'maintenance') {
+        return NextResponse.json(
+          {
+            success: false,
+            machineOffline: true,
+            machineName,
+            error: `⚠️ Kiosk Unavailable: ${machineName} is currently ${status === 'maintenance' ? 'under maintenance' : 'offline/powered off'}. You can release your secret PIN #${cleanPin} at any other online campus kiosk. Your PIN is 100% safe!`,
+          },
+          { status: 400 }
+        );
+      }
+
+      // 2. Capability Matching Check (Color vs B&W Follow-Me Protection)
+      const supportsColor = machine.supports_color ?? machine.featureToggles?.enableColorSingle ?? false;
+      if (order.colorMode === 'color' && !supportsColor) {
+        return NextResponse.json(
+          {
+            success: false,
+            colorMismatch: true,
+            machineName,
+            error: `⚠️ Color Print Notice: Your order is configured for FULL COLOR, but ${machineName} is equipped with a High-Speed B&W Laser Printer only. Please release this PIN at a Color-capable kiosk (e.g. Library Hub). Your PIN #${cleanPin} is safe and has not been used!`,
+          },
+          { status: 400 }
+        );
+      }
+
+      // 3. Physical Paper Tray Stock Guard
       const requiredSheets = order.calculatedSheets || 1;
       const currentStock = machine.current_sheets_remaining ?? machine.currentSheetsRemaining ?? 500;
-      const machineName = machine.display_name || machine.displayName || machineCode;
 
       if (currentStock < requiredSheets) {
         return NextResponse.json(

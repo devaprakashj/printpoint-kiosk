@@ -18,8 +18,9 @@ export async function GET() {
         const machines = data.map((m: any) => {
           const isHeartbeatFresh = Boolean(
             m.last_heartbeat_at &&
-            (Date.now() - new Date(m.last_heartbeat_at).getTime() < 30000)
+            (Date.now() - new Date(m.last_heartbeat_at).getTime() < 20000)
           );
+          const computedStatus = (isHeartbeatFresh && m.status !== 'offline') ? 'online' : 'offline';
 
           return {
             id: m.id,
@@ -29,7 +30,7 @@ export async function GET() {
             displayName: m.display_name || 'Print ATM',
             locationDescription: m.location_description || '',
             deploymentType: m.deployment_type || 'kiosk_atm',
-            status: isHeartbeatFresh ? (m.status || 'online') : 'offline',
+            status: computedStatus,
             paperStatus: m.paper_status || 'ok',
             currentSheetsRemaining: m.current_sheets_remaining ?? 500,
             totalCapacitySheets: m.total_capacity_sheets ?? 500,
@@ -53,6 +54,10 @@ export async function GET() {
             photoUrl: m.photo_url || m.secondary_logo_url,
             openingHours: m.opening_hours || 'Open 24/7',
             googleMapsUrl: m.google_maps_url,
+            supportsBw: m.supports_bw ?? true,
+            supportsColor: m.supports_color ?? false,
+            supportsDuplex: m.supports_duplex ?? Boolean(m.duplex_hardware_capable),
+            supportsPlainPaper: m.supports_plain_paper ?? true,
             lastPaperRefillAt: m.last_paper_refill_at,
             lastHeartbeatAt: m.last_heartbeat_at,
             activePrinterStatus: isHeartbeatFresh ? (m.active_printer_status || 'connected') : 'offline',
@@ -62,7 +67,21 @@ export async function GET() {
       }
     }
 
-    const machines = db.getMachines();
+    const rawMachines = db.getMachines();
+    const machines = rawMachines.map((m: any) => {
+      const isFresh = Boolean(
+        m.lastHeartbeatAt &&
+        (Date.now() - new Date(m.lastHeartbeatAt).getTime() < 45000)
+      );
+      return {
+        ...m,
+        status: isFresh ? (m.status || 'online') : 'offline',
+        supportsBw: m.supportsBw ?? m.featureToggles?.enableBwSingle ?? true,
+        supportsColor: m.supportsColor ?? m.featureToggles?.enableColorSingle ?? false,
+        supportsDuplex: m.supportsDuplex ?? m.duplexHardwareCapable ?? true,
+        supportsPlainPaper: m.supportsPlainPaper ?? true,
+      };
+    });
     return NextResponse.json({ success: true, machines });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Failed to fetch machines';

@@ -309,16 +309,30 @@ export default function SelectLocationPage() {
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-2 text-xs">
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
                         <span
                           className={`font-bold px-2 py-0.5 rounded-full text-[10px] ${
                             isOpen
                               ? 'bg-[#e9f9ee] text-[#008f18] border border-[#00a61c]/30'
-                              : 'bg-amber-50 text-amber-800 border border-amber-200'
+                              : 'bg-rose-50 text-rose-700 border border-rose-200'
                           }`}
                         >
-                          ● {isOpen ? 'Open' : 'Maintenance'}
+                          ● {isOpen ? 'Online & Ready' : 'Machine Offline / Power Off'}
                         </span>
+                        
+                        {/* Hardware Capabilities Badges */}
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border ${
+                          machine.supportsColor
+                            ? 'bg-purple-50 text-purple-700 border-purple-200'
+                            : 'bg-slate-100 text-slate-600 border-slate-200'
+                        }`}>
+                          {machine.supportsColor ? '🎨 Color + B&W' : '📄 B&W Laser Only'}
+                        </span>
+
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200">
+                          {machine.supportsDuplex ? '🔄 Duplex Ready' : '📄 Single-Side'}
+                        </span>
+
                         <span className="text-slate-400">•</span>
                         <p className="text-slate-600 text-xs truncate max-w-md">
                           {machine.fullAddress || machine.locationDescription || 'Self-Service Station'}
@@ -329,14 +343,25 @@ export default function SelectLocationPage() {
 
                   {/* Actions & Distance Bar */}
                   <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
-                    {/* Primary "Print Now ->" CTA Button */}
-                    <button
-                      onClick={() => handleSelectKiosk(machine.machineCode)}
-                      className="flex-1 py-3 px-5 rounded-2xl bg-[#e9f9ee] hover:bg-[#00a61c] text-[#008f18] hover:text-white font-black text-sm flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer active:scale-98 group-hover:bg-[#00a61c] group-hover:text-white"
-                    >
-                      <span>Print Now</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </button>
+                    {/* Primary "Print Now ->" CTA Button with Offline Gating */}
+                    {isOpen ? (
+                      <button
+                        onClick={() => handleSelectKiosk(machine.machineCode)}
+                        className="flex-1 py-3 px-5 rounded-2xl bg-[#e9f9ee] hover:bg-[#00a61c] text-[#008f18] hover:text-white font-black text-sm flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer active:scale-98 group-hover:bg-[#00a61c] group-hover:text-white"
+                      >
+                        <span>Print Now</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+                    ) : (
+                      <button
+                        disabled
+                        className="flex-1 py-3 px-5 rounded-2xl bg-slate-100 text-slate-400 font-bold text-sm flex items-center justify-center gap-2 cursor-not-allowed opacity-80"
+                        title="This kiosk is currently powered off. Please select an active online kiosk."
+                      >
+                        <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
+                        <span>Machine Powered Off (Unavailable)</span>
+                      </button>
+                    )}
 
                     {/* View Photos & Details Button */}
                     <button

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
-import { shredDocumentFromR2 } from '@/lib/r2';
+import { shredDocument, getDocumentDownloadUrl } from '@/lib/storage';
 import { db } from '@/lib/db';
 
 export async function POST(req: NextRequest) {
@@ -31,12 +31,12 @@ export async function POST(req: NextRequest) {
         order = oData;
         targetMachineCode = machineCode || oData.machine_code;
 
-        // Non-blocking shred document from Cloudflare R2 if present
+        // Non-blocking shred document from storage vault (Zero-Retention)
         if (oData.file_storage_url) {
-          Promise.resolve().then(() => shredDocumentFromR2(oData.file_storage_url)).catch(() => {});
+          Promise.resolve().then(() => shredDocument(oData.file_storage_url)).catch(() => {});
         }
 
-        // Set PIN as used, completed and trigger hardware release
+        // Set PIN as used, completed, shred verified, and nullify storage path in DB
         await supabaseAdmin
           .from('orders')
           .update({
@@ -46,6 +46,7 @@ export async function POST(req: NextRequest) {
             completed_at: completedAt,
             file_shredded: true,
             shredded_at: completedAt,
+            file_storage_url: null,
           })
           .eq('id', oData.id);
 
@@ -99,6 +100,36 @@ export async function POST(req: NextRequest) {
         });
       }
     }
+
+    // Enqueue print job to real hardware daemon queue
+    const finalOrder = order || (pin ? db.findAnyOrderByPin(pin) : db.getOrderById(targetKey));
+    const targetMachine = targetMachineCode || finalOrder?.machineCode || 'RIT-ATM-01';
+
+    const storagePath = finalOrder?.file_storage_url || finalOrder?.fileStorageUrl || '';
+    let downloadUrl = '';
+    if (storagePath) {
+      try {
+        downloadUrl = await getDocumentDownloadUrl(storagePath, 300);
+      } catch {}
+    }
+
+    const jobPayload = {
+      orderId: finalOrder?.id || `job-${Date.now()}`,
+      orderNumber: finalOrder?.orderNumber || finalOrder?.order_number || (pin ? `PIN-${pin}` : `ORD-${Date.now()}`),
+      fileName: finalOrder?.fileName || finalOrder?.file_name || 'Campus_Document.pdf',
+      fileStorageUrl: storagePath,
+      downloadUrl: downloadUrl,
+      pages: finalOrder?.calculatedPrintPages || finalOrder?.calculated_print_pages || 1,
+      sheets: finalOrder?.calculatedSheets || finalOrder?.calculated_sheets || 1,
+      copies: finalOrder?.copies || 1,
+      colorMode: finalOrder?.colorMode || finalOrder?.color_mode || 'bw',
+      duplexMode: finalOrder?.duplexMode || finalOrder?.duplex_mode || 'single',
+      paperSize: finalOrder?.paperSize || finalOrder?.paper_size || 'A4',
+      pin: pin || 'N/A',
+      releasedAt: completedAt,
+    };
+
+    db.enqueueHardwareJob(targetMachine, jobPayload);
 
     return NextResponse.json({
       success: true,

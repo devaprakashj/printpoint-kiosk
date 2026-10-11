@@ -62,6 +62,10 @@ export interface Machine {
   printerSpoolerName?: string;
   printerPortOrIp?: string;
   duplexHardwareCapable?: boolean;
+  supportsBw?: boolean;
+  supportsColor?: boolean;
+  supportsDuplex?: boolean;
+  supportsPlainPaper?: boolean;
   paperTrayCapacity?: number;
   daemonSecretToken?: string;
   printerRouting?: PrinterRoutingConfig;

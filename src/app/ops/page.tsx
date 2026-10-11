@@ -44,6 +44,7 @@ import {
   ExternalLink,
   ShieldAlert,
   FileCheck,
+  Plus,
 } from 'lucide-react';
 import Logo from '@/components/Logo';
 
@@ -122,6 +123,19 @@ export default function SmartPrintOpsConsole() {
   const [selectedUserHistory, setSelectedUserHistory] = useState<any | null>(null);
   const [isShredding, setIsShredding] = useState<boolean>(false);
   const [copiedPin, setCopiedPin] = useState<string | null>(null);
+  // Machine Provisioning & Token Modal
+  const [showAddMachineModal, setShowAddMachineModal] = useState<boolean>(false);
+  const [newMachineForm, setNewMachineForm] = useState({
+    machineCode: '',
+    displayName: '',
+    locationDescription: '',
+    totalCapacitySheets: 500,
+    supportsBw: true,
+    supportsColor: false,
+    supportsDuplex: true,
+    supportsPlainPaper: true,
+  });
+  const [createdMachineSecret, setCreatedMachineSecret] = useState<any | null>(null);
 
   // Settings Tab Pricing Form
   const [pricingForm, setPricingForm] = useState({
@@ -170,7 +184,7 @@ export default function SmartPrintOpsConsole() {
   const fetchOpsData = async () => {
     setIsFetchingData(true);
     try {
-      const res = await fetch('/api/admin');
+      const res = await fetch('/api/admin', { cache: 'no-store' });
       const json = await res.json();
       if (json.success && json.data) {
         setAdminData(json.data);
@@ -364,6 +378,81 @@ export default function SmartPrintOpsConsole() {
       }
     } catch {
       showToast('Failed to toggle status', 'error');
+    }
+  };
+
+  // Action: Toggle Hardware Capability (B&W, Color, Duplex, Plain Paper)
+  const handleToggleCapability = async (machineCode: string, capability: string, enabled: boolean) => {
+    try {
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'toggle_capability',
+          payload: { machineCode, capability, enabled },
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`${machineCode}: ${capability.replace('supports_', '').toUpperCase()} is now ${enabled ? 'ENABLED' : 'DISABLED'}`);
+        fetchOpsData();
+      }
+    } catch {
+      showToast('Failed to toggle capability', 'error');
+    }
+  };
+
+  // Action: Create New Kiosk Machine
+  const handleCreateNewMachine = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMachineForm.machineCode.trim()) {
+      showToast('Please enter a Machine Code (e.g. RIT-ATM-02)', 'error');
+      return;
+    }
+    try {
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create_machine',
+          payload: {
+            ...newMachineForm,
+            machineCode: newMachineForm.machineCode.trim().toUpperCase(),
+          },
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`Kiosk ${data.machine?.machineCode || newMachineForm.machineCode} created successfully!`);
+        setCreatedMachineSecret(data.machine);
+        fetchOpsData();
+      } else {
+        showToast(data.error || 'Failed to create kiosk', 'error');
+      }
+    } catch {
+      showToast('Failed to create kiosk machine', 'error');
+    }
+  };
+
+  // Action: Delete Kiosk Machine
+  const handleDeleteMachine = async (machineCode: string) => {
+    if (!confirm(`Are you sure you want to delete Kiosk ${machineCode}?`)) return;
+    try {
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'delete_machine',
+          payload: { machineCode },
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`Kiosk ${machineCode} deleted!`);
+        fetchOpsData();
+      }
+    } catch {
+      showToast('Failed to delete kiosk', 'error');
     }
   };
 
@@ -888,10 +977,13 @@ export default function SmartPrintOpsConsole() {
                   <div className="p-4 rounded-xl bg-white border border-slate-200 shadow-2xs space-y-1">
                     <p className="text-xs font-medium text-slate-500">Active Printers</p>
                     <p className="text-2xl font-bold text-slate-900 tracking-tight">
-                      2 Online
+                      {machinesList.some((m: any) => m.activePrinterStatus === 'connected') ? '1 Connected' : '0 Connected'}
                     </p>
-                    <p className="text-[11px] text-slate-500 font-medium">
-                      HP Laser + Epson Color
+                    <p className={`text-[11px] font-medium flex items-center gap-1 ${
+                      machinesList.some((m: any) => m.activePrinterStatus === 'connected') ? 'text-emerald-600' : 'text-amber-600'
+                    }`}>
+                      <span className={`h-1.5 w-1.5 rounded-full ${machinesList.some((m: any) => m.activePrinterStatus === 'connected') ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                      {machinesList.some((m: any) => m.activePrinterStatus === 'connected') ? 'HP LaserJet USB Online' : 'HP Laser USB Unplugged'}
                     </p>
                   </div>
 
@@ -1747,52 +1839,64 @@ export default function SmartPrintOpsConsole() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* HP LaserJet */}
-                  <div className="p-5 rounded-xl bg-white border border-slate-200 shadow-2xs space-y-4">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h2 className="text-sm font-bold text-slate-900">HP LaserJet Professional P1106</h2>
-                        <p className="text-xs text-slate-400">Primary High-Speed B&amp;W Spooler</p>
-                      </div>
-                      <span className="text-[11px] font-medium text-emerald-600 flex items-center gap-1">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                        Online
-                      </span>
-                    </div>
+                  {(() => {
+                    const ritMachine = machinesList.find((m: any) => m.machineCode === 'RIT-ATM-01') || machinesList[0];
+                    const isHpOnline = ritMachine?.activePrinterStatus === 'connected';
 
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
-                        <p className="text-slate-400 text-[10px]">Port</p>
-                        <p className="font-semibold text-slate-800 mt-0.5 font-mono">USB001</p>
-                      </div>
-                      <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
-                        <p className="text-slate-400 text-[10px]">Duplex</p>
-                        <p className="font-semibold text-slate-800 mt-0.5">Hardware Ready</p>
-                      </div>
-                      <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
-                        <p className="text-slate-400 text-[10px]">Lifetime Spooled</p>
-                        <p className="font-semibold text-slate-800 mt-0.5 font-mono">14,820 sheets</p>
-                      </div>
-                      <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
-                        <p className="text-slate-400 text-[10px]">Queue</p>
-                        <p className="font-semibold text-slate-800 mt-0.5">0 jobs (Idle)</p>
-                      </div>
-                    </div>
+                    return (
+                      <div className="p-5 rounded-xl bg-white border border-slate-200 shadow-2xs space-y-4">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <h2 className="text-sm font-bold text-slate-900">HP LaserJet Professional P1106</h2>
+                            <p className="text-xs text-slate-400">Primary High-Speed B&amp;W Spooler &bull; RIT-ATM-01</p>
+                          </div>
+                          <span className={`text-[11px] font-semibold flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border ${
+                            isHpOnline
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-amber-50 text-amber-700 border-amber-200'
+                          }`}>
+                            <span className={`h-1.5 w-1.5 rounded-full ${isHpOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                            <span>{isHpOnline ? 'Online (USB Ready)' : 'Offline (USB Unplugged)'}</span>
+                          </span>
+                        </div>
 
-                    <div className="pt-1 flex items-center gap-2">
-                      <button
-                        onClick={() => handleTriggerTestPrint('RIT-ATM-01')}
-                        className="flex-1 py-1.5 px-3 rounded-lg bg-slate-900 text-white hover:bg-black font-medium text-xs transition-colors cursor-pointer text-center"
-                      >
-                        Print Test Sheet
-                      </button>
-                      <button
-                        onClick={() => showToast('HP LaserJet Spooler refreshed!')}
-                        className="py-1.5 px-3 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 font-medium text-xs transition-colors cursor-pointer"
-                      >
-                        Flush Queue
-                      </button>
-                    </div>
-                  </div>
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
+                            <p className="text-slate-400 text-[10px]">Port / Connection</p>
+                            <p className="font-semibold text-slate-800 mt-0.5 font-mono">USB001</p>
+                          </div>
+                          <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
+                            <p className="text-slate-400 text-[10px]">Cable Hardware</p>
+                            <p className={`font-semibold mt-0.5 ${isHpOnline ? 'text-emerald-700' : 'text-amber-700'}`}>
+                              {isHpOnline ? 'Physically Plugged' : 'Cable Disconnected'}
+                            </p>
+                          </div>
+                          <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
+                            <p className="text-slate-400 text-[10px]">Paper Tray Feed</p>
+                            <p className="font-semibold text-slate-800 mt-0.5 font-mono">{ritMachine?.currentSheetsRemaining || 500} sheets</p>
+                          </div>
+                          <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
+                            <p className="text-slate-400 text-[10px]">Queue Mode</p>
+                            <p className="font-semibold text-slate-800 mt-0.5">{isHpOnline ? 'Live USB Feeder' : 'Safe Dry-Run Spool'}</p>
+                          </div>
+                        </div>
+                        <div className="pt-1 flex items-center gap-2">
+                          <button
+                            onClick={() => handleTriggerTestPrint('RIT-ATM-01')}
+                            className="flex-1 py-1.5 px-3 rounded-lg bg-slate-900 text-white hover:bg-black font-medium text-xs transition-colors cursor-pointer text-center"
+                          >
+                            Print Test Sheet
+                          </button>
+                          <button
+                            onClick={() => showToast('HP LaserJet Spooler refreshed!')}
+                            className="py-1.5 px-3 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 font-medium text-xs transition-colors cursor-pointer"
+                          >
+                            Flush Queue
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Epson Color */}
                   <div className="p-5 rounded-xl bg-white border border-slate-200 shadow-2xs space-y-4">
@@ -1850,11 +1954,25 @@ export default function SmartPrintOpsConsole() {
             {/* ------------------------------------------------------------- */}
             {activeTab === 'Machines' && (
               <div className="space-y-4">
-                <div className="pb-1">
-                  <h1 className="text-xl font-bold text-slate-900 tracking-tight">Kiosk Machines</h1>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Physical ATM units, paper trays, toner levels and diagnostics
-                  </p>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-1">
+                  <div>
+                    <h1 className="text-xl font-bold text-slate-900 tracking-tight">Kiosk Machines</h1>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Physical ATM units, Raspberry Pi controllers, hardware toggles &amp; paper spoolers
+                    </p>
+                  </div>
+
+                  {/* Provision New Kiosk Button */}
+                  <button
+                    onClick={() => {
+                      setCreatedMachineSecret(null);
+                      setShowAddMachineModal(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-colors shadow-2xs cursor-pointer self-start sm:self-auto"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span>Provision New Kiosk</span>
+                  </button>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1862,9 +1980,18 @@ export default function SmartPrintOpsConsole() {
                     const sheetsRem = m.currentSheetsRemaining || 480;
                     const totalCap = m.totalCapacitySheets || 500;
                     const paperPct = Math.round((sheetsRem / totalCap) * 100);
+                    const isHeartbeatFresh = m.lastHeartbeatAt
+                      ? (Date.now() - new Date(m.lastHeartbeatAt).getTime() < 20000)
+                      : false;
+                    const isOnline = m.status === 'online' && isHeartbeatFresh;
+
+                    const supportsBw = m.supports_bw ?? m.supportsBw ?? m.featureToggles?.enableBwSingle ?? true;
+                    const supportsColor = m.supports_color ?? m.supportsColor ?? m.featureToggles?.enableColorSingle ?? false;
+                    const supportsDuplex = m.supports_duplex ?? m.supportsDuplex ?? m.duplexHardwareCapable ?? true;
 
                     return (
                       <div key={m.id} className="p-5 rounded-xl bg-white border border-slate-200 shadow-2xs space-y-4">
+                        {/* Header & Status Indicator */}
                         <div className="flex items-start justify-between">
                           <div>
                             <div className="flex items-center gap-2">
@@ -1875,10 +2002,88 @@ export default function SmartPrintOpsConsole() {
                             </div>
                             <p className="text-xs text-slate-400 mt-0.5">{m.locationDescription}</p>
                           </div>
-                          <span className="text-[11px] font-medium text-emerald-600 flex items-center gap-1">
-                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                            {m.status === 'online' ? 'Online' : 'Maintenance'}
-                          </span>
+
+                          <div className="flex items-center gap-2 flex-wrap justify-end">
+                            <span className={`text-[11px] font-semibold flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border ${
+                              isOnline
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-rose-50 text-rose-700 border-rose-200'
+                            }`}>
+                              <span className={`h-1.5 w-1.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+                              <span>{isOnline ? 'Daemon Online' : 'Daemon Offline'}</span>
+                            </span>
+
+                            <span className={`text-[10px] font-semibold flex items-center gap-1 px-2 py-0.5 rounded-full border ${
+                              m.activePrinterStatus === 'connected'
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-amber-50 text-amber-700 border-amber-200'
+                            }`}>
+                              <Printer className="h-3 w-3" />
+                              <span>{m.activePrinterStatus === 'connected' ? 'HP Laser USB OK' : 'Printer Unplugged'}</span>
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Real-Time Hardware Capability Toggles */}
+                        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                            Hardware Print Capabilities (Customer Toggles)
+                          </p>
+                          <div className="grid grid-cols-3 gap-2 text-xs">
+                            {/* B&W Capability */}
+                            <button
+                              onClick={() => handleToggleCapability(m.machineCode, 'supports_bw', !supportsBw)}
+                              className={`p-2 rounded-lg border text-left cursor-pointer transition-all ${
+                                supportsBw
+                                  ? 'bg-blue-50/70 border-blue-200 text-blue-900'
+                                  : 'bg-white border-slate-200 text-slate-400 opacity-70'
+                              }`}
+                            >
+                              <div className="font-bold text-[11px] flex items-center justify-between">
+                                <span>B&amp;W Laser</span>
+                                <span>{supportsBw ? '✓' : '✕'}</span>
+                              </div>
+                              <span className="text-[9px] block mt-0.5">
+                                {supportsBw ? 'Available' : 'Disabled'}
+                              </span>
+                            </button>
+
+                            {/* Color Capability */}
+                            <button
+                              onClick={() => handleToggleCapability(m.machineCode, 'supports_color', !supportsColor)}
+                              className={`p-2 rounded-lg border text-left cursor-pointer transition-all ${
+                                supportsColor
+                                  ? 'bg-purple-50/70 border-purple-200 text-purple-900'
+                                  : 'bg-white border-slate-200 text-slate-400 opacity-70'
+                              }`}
+                            >
+                              <div className="font-bold text-[11px] flex items-center justify-between">
+                                <span>Color Print</span>
+                                <span>{supportsColor ? '✓' : '✕'}</span>
+                              </div>
+                              <span className="text-[9px] block mt-0.5">
+                                {supportsColor ? 'Available' : 'Users: Coming Soon'}
+                              </span>
+                            </button>
+
+                            {/* Duplex Capability */}
+                            <button
+                              onClick={() => handleToggleCapability(m.machineCode, 'supports_duplex', !supportsDuplex)}
+                              className={`p-2 rounded-lg border text-left cursor-pointer transition-all ${
+                                supportsDuplex
+                                  ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                                  : 'bg-white border-slate-200 text-slate-400 opacity-70'
+                              }`}
+                            >
+                              <div className="font-bold text-[11px] flex items-center justify-between">
+                                <span>Duplex</span>
+                                <span>{supportsDuplex ? '✓' : '✕'}</span>
+                              </div>
+                              <span className="text-[9px] block mt-0.5">
+                                {supportsDuplex ? 'Front & Back' : 'Single Only'}
+                              </span>
+                            </button>
+                          </div>
                         </div>
 
                         {/* Paper Progress Gauge */}
@@ -1906,13 +2111,20 @@ export default function SmartPrintOpsConsole() {
                             <p className="font-mono font-semibold text-slate-800">{m.internalTempCelsius || 24}&deg;C</p>
                           </div>
                           <div className="p-2 rounded-lg bg-slate-50 border border-slate-100">
-                            <p className="text-[10px] text-slate-400">Door</p>
-                            <p className="font-semibold text-emerald-700">Locked</p>
+                            <p className="text-[10px] text-slate-400">Pi Touchscreen</p>
+                            <Link
+                              href={`/kiosk/${m.machineCode}`}
+                              target="_blank"
+                              className="font-semibold text-blue-600 hover:text-blue-800 flex items-center justify-center gap-0.5 mt-0.5"
+                            >
+                              <span>Open UI</span>
+                              <ExternalLink className="h-2.5 w-2.5" />
+                            </Link>
                           </div>
                         </div>
 
                         {/* Controls */}
-                        <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-100 text-xs">
+                        <div className="grid grid-cols-4 gap-2 pt-1 border-t border-slate-100 text-xs">
                           <button
                             onClick={() => handleRefillPaper(m.machineCode, 500)}
                             className="py-1.5 px-2 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 font-medium cursor-pointer text-center"
@@ -1931,11 +2143,199 @@ export default function SmartPrintOpsConsole() {
                           >
                             Test Print
                           </button>
+                          <button
+                            onClick={() => handleDeleteMachine(m.machineCode)}
+                            className="py-1.5 px-2 rounded-lg border border-rose-200 hover:bg-rose-50 text-rose-600 font-medium cursor-pointer text-center flex items-center justify-center gap-1"
+                            title="Delete this machine"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                            <span>Delete</span>
+                          </button>
                         </div>
                       </div>
                     );
                   })}
                 </div>
+
+                {/* PROVISION NEW KIOSK MODAL */}
+                {showAddMachineModal && (
+                  <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-100">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                        <div>
+                          <h2 className="text-base font-bold text-slate-900">
+                            Provision New ATM Kiosk
+                          </h2>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            Register a physical Raspberry Pi 5 unit to campus network
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setShowAddMachineModal(false);
+                            setCreatedMachineSecret(null);
+                          }}
+                          className="p-1 rounded text-slate-400 hover:text-slate-600 cursor-pointer"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+
+                      {createdMachineSecret ? (
+                        <div className="space-y-4">
+                          <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs space-y-2">
+                            <div className="font-bold flex items-center gap-1.5 text-sm">
+                              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                              <span>Kiosk {createdMachineSecret.machineCode} Successfully Registered!</span>
+                            </div>
+                            <p className="text-emerald-700">
+                              Use the Daemon Secret Token below to authenticate your Raspberry Pi 5 or Laptop Python client.
+                            </p>
+                          </div>
+
+                          <div className="p-3 rounded-xl bg-slate-900 text-white font-mono text-xs space-y-2">
+                            <div className="flex justify-between items-center text-slate-400 text-[10px]">
+                              <span>DAEMON_SECRET_TOKEN</span>
+                              <button
+                                onClick={() => handleCopyPin(createdMachineSecret.daemon_secret_token || createdMachineSecret.daemonSecretToken || '')}
+                                className="text-blue-400 hover:text-blue-300 font-sans cursor-pointer flex items-center gap-1"
+                              >
+                                <Copy className="h-3 w-3" />
+                                <span>Copy Token</span>
+                              </button>
+                            </div>
+                            <p className="font-bold text-emerald-400 break-all select-all">
+                              {createdMachineSecret.daemon_secret_token || createdMachineSecret.daemonSecretToken || 'tok_generated_secure'}
+                            </p>
+                          </div>
+
+                          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 space-y-1">
+                            <p className="font-bold text-slate-800">Quick Test Command on Laptop / Pi:</p>
+                            <code className="text-[11px] font-mono block bg-white p-2 rounded border border-slate-200 text-slate-900 select-all">
+                              python smartprint_daemon.py --machine {createdMachineSecret.machineCode} --token {createdMachineSecret.daemon_secret_token || createdMachineSecret.daemonSecretToken || 'tok_sec'}
+                            </code>
+                          </div>
+
+                          <div className="flex justify-end pt-2">
+                            <button
+                              onClick={() => {
+                                setShowAddMachineModal(false);
+                                setCreatedMachineSecret(null);
+                              }}
+                              className="px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 font-semibold text-xs cursor-pointer"
+                            >
+                              Done &amp; Close
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <form onSubmit={handleCreateNewMachine} className="space-y-3.5 text-xs">
+                          <div>
+                            <label className="block font-semibold text-slate-700 mb-1">
+                              Machine Code *
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              placeholder="e.g. RIT-ATM-02"
+                              value={newMachineForm.machineCode}
+                              onChange={(e) => setNewMachineForm({ ...newMachineForm, machineCode: e.target.value.toUpperCase() })}
+                              className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono font-bold text-slate-900 focus:outline-none focus:border-blue-600"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block font-semibold text-slate-700 mb-1">
+                              Display Name *
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              placeholder="e.g. Library 2nd Floor Hub"
+                              value={newMachineForm.displayName}
+                              onChange={(e) => setNewMachineForm({ ...newMachineForm, displayName: e.target.value })}
+                              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-900 focus:outline-none focus:border-blue-600"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block font-semibold text-slate-700 mb-1">
+                              Campus Location Description
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="e.g. Near Digital Reference Wing"
+                              value={newMachineForm.locationDescription}
+                              onChange={(e) => setNewMachineForm({ ...newMachineForm, locationDescription: e.target.value })}
+                              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-900 focus:outline-none focus:border-blue-600"
+                            />
+                          </div>
+
+                          {/* Initial Hardware Capabilities Checkboxes */}
+                          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                            <span className="font-bold text-slate-700 block">Hardware Printer Capabilities:</span>
+                            
+                            <label className="flex items-center gap-2 cursor-pointer text-slate-800">
+                              <input
+                                type="checkbox"
+                                checked={newMachineForm.supportsBw}
+                                onChange={(e) => setNewMachineForm({ ...newMachineForm, supportsBw: e.target.checked })}
+                                className="h-4 w-4 rounded text-blue-600 border-slate-300"
+                              />
+                              <span>Black &amp; White Laser (HP LaserJet P1106)</span>
+                            </label>
+
+                            <label className="flex items-center gap-2 cursor-pointer text-slate-800">
+                              <input
+                                type="checkbox"
+                                checked={newMachineForm.supportsColor}
+                                onChange={(e) => setNewMachineForm({ ...newMachineForm, supportsColor: e.target.checked })}
+                                className="h-4 w-4 rounded text-blue-600 border-slate-300"
+                              />
+                              <span>Color Photo &amp; Ink Tank (Epson L3250)</span>
+                            </label>
+
+                            <label className="flex items-center gap-2 cursor-pointer text-slate-800">
+                              <input
+                                type="checkbox"
+                                checked={newMachineForm.supportsDuplex}
+                                onChange={(e) => setNewMachineForm({ ...newMachineForm, supportsDuplex: e.target.checked })}
+                                className="h-4 w-4 rounded text-blue-600 border-slate-300"
+                              />
+                              <span>Two-Sided Printing (Duplex Hardware Inversion)</span>
+                            </label>
+
+                            <label className="flex items-center gap-2 cursor-pointer text-slate-800">
+                              <input
+                                type="checkbox"
+                                checked={newMachineForm.supportsPlainPaper}
+                                onChange={(e) => setNewMachineForm({ ...newMachineForm, supportsPlainPaper: e.target.checked })}
+                                className="h-4 w-4 rounded text-blue-600 border-slate-300"
+                              />
+                              <span>Plain Blank A4 Sheet Delivery</span>
+                            </label>
+                          </div>
+
+                          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                            <button
+                              type="button"
+                              onClick={() => setShowAddMachineModal(false)}
+                              className="px-4 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 font-medium cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold cursor-pointer shadow-2xs"
+                            >
+                              Provision &amp; Generate Token
+                            </button>
+                          </div>
+                        </form>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

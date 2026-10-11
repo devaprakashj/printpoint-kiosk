@@ -38,3 +38,7 @@ next-env.d.ts
 
 # whatsapp session files
 /whatsapp_auth/
+
+# python
+__pycache__/
+*.pyc

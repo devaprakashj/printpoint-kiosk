@@ -3,6 +3,8 @@ import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
 import { db } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
 
 export async function GET(req: NextRequest) {
   try {
@@ -20,42 +22,64 @@ export async function GET(req: NextRequest) {
       ]);
 
       if (mRes.data) {
-        machines = mRes.data.map((m: any) => ({
-          id: m.id,
-          organizationId: m.organization_id,
-          organizationName: m.organization_name,
-          machineCode: m.machine_code,
-          displayName: m.display_name,
-          locationDescription: m.location_description,
-          deploymentType: m.deployment_type,
-          status: m.status,
-          paperStatus: m.paper_status,
-          currentSheetsRemaining: m.current_sheets_remaining,
-          totalCapacitySheets: m.total_capacity_sheets,
-          tonerLevelPercent: m.toner_level_percent,
-          internalTempCelsius: m.internal_temp_celsius,
-          isDoorOpen: m.is_door_open,
-          qrCodeToken: m.qr_code_token,
-          defaultPrinterModel: m.default_printer_model,
-          printerConnectionType: m.printer_connection_type,
-          printerSpoolerName: m.printer_spooler_name,
-          printerPortOrIp: m.printer_port_or_ip,
-          duplexHardwareCapable: m.duplex_hardware_capable,
-          daemonSecretToken: m.daemon_secret_token,
-          secondaryLogoUrl: m.secondary_logo_url,
-          customDomain: m.custom_domain,
-          managerPhone: m.manager_phone,
-          lowPaperThreshold: m.low_paper_threshold,
-          latitude: m.latitude,
-          longitude: m.longitude,
-          fullAddress: m.full_address || m.location_description,
-          photoUrl: m.photo_url || m.secondary_logo_url,
-          openingHours: m.opening_hours || 'Open 24/7',
-          googleMapsUrl: m.google_maps_url,
-          lastPaperRefillAt: m.last_paper_refill_at,
-          lastHeartbeatAt: m.last_heartbeat_at,
-          activePrinterStatus: m.active_printer_status,
-        }));
+        machines = mRes.data.map((m: any) => {
+          const lastHbTime = m.last_heartbeat_at ? new Date(m.last_heartbeat_at).getTime() : 0;
+          // Machine is only online if python daemon sent a heartbeat within the last 20 seconds
+          const isAlive = Boolean(
+            m.last_heartbeat_at &&
+            (Date.now() - lastHbTime) < 20000 &&
+            m.status !== 'offline'
+          );
+          const machineStatus = isAlive ? 'online' : 'offline';
+          const printerStatus = isAlive ? (m.active_printer_status || 'offline') : 'offline';
+
+          const adminClient = supabaseAdmin;
+          if (m.status === 'online' && !isAlive && adminClient) {
+            Promise.resolve().then(() => {
+              adminClient
+                .from('machines')
+                .update({ status: 'offline', active_printer_status: 'offline' })
+                .eq('id', m.id);
+            }).catch(() => {});
+          }
+
+          return {
+            id: m.id,
+            organizationId: m.organization_id,
+            organizationName: m.organization_name,
+            machineCode: m.machine_code,
+            displayName: m.display_name,
+            locationDescription: m.location_description,
+            deploymentType: m.deployment_type,
+            status: machineStatus,
+            paperStatus: m.paper_status,
+            currentSheetsRemaining: m.current_sheets_remaining,
+            totalCapacitySheets: m.total_capacity_sheets,
+            tonerLevelPercent: m.toner_level_percent,
+            internalTempCelsius: m.internal_temp_celsius,
+            isDoorOpen: m.is_door_open,
+            qrCodeToken: m.qr_code_token,
+            defaultPrinterModel: m.default_printer_model,
+            printerConnectionType: m.printer_connection_type,
+            printerSpoolerName: m.printer_spooler_name,
+            printerPortOrIp: m.printer_port_or_ip,
+            duplexHardwareCapable: m.duplex_hardware_capable,
+            daemonSecretToken: m.daemon_secret_token,
+            secondaryLogoUrl: m.secondary_logo_url,
+            customDomain: m.custom_domain,
+            managerPhone: m.manager_phone,
+            lowPaperThreshold: m.low_paper_threshold,
+            latitude: m.latitude,
+            longitude: m.longitude,
+            fullAddress: m.full_address || m.location_description,
+            photoUrl: m.photo_url || m.secondary_logo_url,
+            openingHours: m.opening_hours || 'Open 24/7',
+            googleMapsUrl: m.google_maps_url,
+            lastPaperRefillAt: m.last_paper_refill_at,
+            lastHeartbeatAt: m.last_heartbeat_at,
+            activePrinterStatus: printerStatus,
+          };
+        });
       }
 
       if (oRes.data) {
@@ -125,13 +149,29 @@ export async function GET(req: NextRequest) {
         fileShredded: Boolean(o.fileShredded || o.orderStatus === 'completed'),
         shredMethod: o.shredMethod || 'DoD 5220.22-M Zero-Wipe',
       }));
-      machines = db.getMachines();
+      machines = db.getMachines().map(m => {
+        const lastHbTime = m.lastHeartbeatAt ? new Date(m.lastHeartbeatAt).getTime() : 0;
+        const isAlive = (Date.now() - lastHbTime) < 12000;
+        return {
+          ...m,
+          status: isAlive ? m.status : 'offline',
+          activePrinterStatus: isAlive ? m.activePrinterStatus : 'offline',
+        };
+      });
       organizations = db.getOrganizations();
       pricingRules = db.getPricingRule('default');
     }
 
     if (machines.length === 0) {
-      machines = db.getMachines();
+      machines = db.getMachines().map(m => {
+        const lastHbTime = m.lastHeartbeatAt ? new Date(m.lastHeartbeatAt).getTime() : 0;
+        const isAlive = (Date.now() - lastHbTime) < 12000;
+        return {
+          ...m,
+          status: isAlive ? m.status : 'offline',
+          activePrinterStatus: isAlive ? m.activePrinterStatus : 'offline',
+        };
+      });
     }
     if (!pricingRules) {
       pricingRules = db.getPricingRule('default');
@@ -407,6 +447,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, machine });
     }
 
+    if (action === 'toggle_capability') {
+      const { machineCode, capability, enabled } = payload;
+      const cleanCode = String(machineCode).trim().toUpperCase();
+
+      if (isSupabaseConfigured && supabaseAdmin) {
+        await supabaseAdmin
+          .from('machines')
+          .update({ [capability]: enabled })
+          .eq('machine_code', cleanCode);
+      }
+
+      const mem = db.getMachines().find((m: any) => m.machineCode?.toUpperCase() === cleanCode);
+      if (mem) {
+        (mem as any)[capability] = enabled;
+        if (mem.featureToggles) {
+          if (capability === 'supports_color') mem.featureToggles.enableColorSingle = enabled;
+          if (capability === 'supports_duplex') mem.featureToggles.enableBwDuplex = enabled;
+          if (capability === 'supports_bw') mem.featureToggles.enableBwSingle = enabled;
+        }
+      }
+
+      return NextResponse.json({ success: true, machineCode: cleanCode, capability, enabled });
+    }
+
     if (action === 'delete_machine') {
       const { machineCode } = payload;
       if (isSupabaseConfigured && supabaseAdmin) {
@@ -436,6 +500,10 @@ export async function POST(req: NextRequest) {
         printerPortOrIp,
         totalCapacitySheets,
         duplexHardwareCapable,
+        supportsBw = true,
+        supportsColor = false,
+        supportsDuplex = true,
+        supportsPlainPaper = true,
         secondaryLogoUrl,
         customDomain,
         managerPhone,
@@ -475,11 +543,15 @@ export async function POST(req: NextRequest) {
           internal_temp_celsius: 27.5,
           is_door_open: false,
           qr_code_token: `qr-${codeUpper.toLowerCase()}-sec`,
-          default_printer_model: defaultPrinterModel || 'HP LaserJet Pro M404dn',
+          default_printer_model: defaultPrinterModel || 'HP LaserJet Professional P1106',
           printer_connection_type: printerConnectionType || 'windows_spooler',
-          printer_spooler_name: printerSpoolerName || defaultPrinterModel || 'HP LaserJet Pro M404dn',
-          printer_port_or_ip: printerPortOrIp || 'USB001',
-          duplex_hardware_capable: duplexHardwareCapable ?? true,
+          printer_spooler_name: printerSpoolerName || defaultPrinterModel || 'HP LaserJet Professional P1106',
+          printerPortOrIp: printerPortOrIp || 'USB001',
+          duplex_hardware_capable: Boolean(supportsDuplex ?? duplexHardwareCapable ?? true),
+          supports_bw: Boolean(supportsBw),
+          supports_color: Boolean(supportsColor),
+          supports_duplex: Boolean(supportsDuplex),
+          supports_plain_paper: Boolean(supportsPlainPaper),
           daemon_secret_token: `tok_${codeUpper.toLowerCase()}_sec${Math.floor(1000 + Math.random() * 9000)}`,
           secondary_logo_url: secondaryLogoUrl || '',
           custom_domain: customDomain || '',
@@ -533,11 +605,24 @@ export async function POST(req: NextRequest) {
         internalTempCelsius: 27.5,
         isDoorOpen: false,
         qrCodeToken: `qr-${codeUpper.toLowerCase()}-sec`,
-        defaultPrinterModel: defaultPrinterModel || 'HP LaserJet Pro M404dn',
+        defaultPrinterModel: defaultPrinterModel || 'HP LaserJet Professional P1106',
         printerConnectionType: printerConnectionType || 'windows_spooler',
-        printerSpoolerName: printerSpoolerName || defaultPrinterModel || 'HP LaserJet Pro M404dn',
+        printerSpoolerName: printerSpoolerName || defaultPrinterModel || 'HP LaserJet Professional P1106',
         printerPortOrIp: printerPortOrIp || 'USB001',
-        duplexHardwareCapable: duplexHardwareCapable ?? true,
+        duplexHardwareCapable: Boolean(supportsDuplex ?? duplexHardwareCapable ?? true),
+        supportsBw: Boolean(supportsBw),
+        supportsColor: Boolean(supportsColor),
+        supportsDuplex: Boolean(supportsDuplex),
+        supportsPlainPaper: Boolean(supportsPlainPaper),
+        featureToggles: {
+          enableBwSingle: Boolean(supportsBw),
+          enableBwDuplex: Boolean(supportsDuplex),
+          enableColorSingle: Boolean(supportsColor),
+          enableColorDuplex: Boolean(supportsColor && supportsDuplex),
+          enablePhotoPrint: Boolean(supportsColor),
+          enableQrUpload: true,
+          enableDirectUsb: false,
+        },
         daemonSecretToken: `tok_${codeUpper.toLowerCase()}_sec${Math.floor(1000 + Math.random() * 9000)}`,
         secondaryLogoUrl: secondaryLogoUrl || '',
         customDomain: customDomain || '',

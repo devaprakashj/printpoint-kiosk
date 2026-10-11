@@ -74,6 +74,7 @@ export default function QwikprintAuthenticApp() {
   const [currentMachine, setCurrentMachine] = useState<Machine | null>(null);
   const [pricingRule, setPricingRule] = useState<PricingRule | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [showStationModal, setShowStationModal] = useState(false);
 
   // App View Step: 'upload_landing' | 'blank_sheets' | 'files_uploaded_list' | 'configure_settings' | 'review_order' | 'pin_success'
   const [currentStep, setCurrentStep] = useState<'upload_landing' | 'blank_sheets' | 'files_uploaded_list' | 'configure_settings' | 'review_order' | 'pin_success'>('upload_landing');
@@ -142,15 +143,15 @@ export default function QwikprintAuthenticApp() {
   // Fetch Machines & Pricing
   const loadKiosks = async () => {
     try {
-      const res = await fetch('/api/machines');
+      const res = await fetch('/api/machines', { cache: 'no-store' });
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.machines) {
         setMachines(data.machines);
         const match = data.machines.find((m: Machine) => m.machineCode === selectedMachineCode) || data.machines[0];
         setCurrentMachine(match);
       }
 
-      const pRes = await fetch(`/api/kiosk/${selectedMachineCode}`);
+      const pRes = await fetch(`/api/kiosk/${selectedMachineCode}`, { cache: 'no-store' });
       const pData = await pRes.json();
       if (pData.success) {
         setPricingRule(pData.pricingRule);
@@ -160,9 +161,33 @@ export default function QwikprintAuthenticApp() {
     }
   };
 
+  // Live 3-second heartbeat polling so Python daemon on/off and Admin Ops toggles reflect instantly
   useEffect(() => {
     loadKiosks();
+    const interval = setInterval(loadKiosks, 3000);
+    return () => clearInterval(interval);
   }, [selectedMachineCode]);
+
+  // Operational State & Capabilities Derived from Live Machine
+  const isMachineOnline = currentMachine?.status === 'online';
+  const isMachineMaintenance = currentMachine?.status === 'maintenance';
+  const isPaperOut = (currentMachine?.currentSheetsRemaining ?? 500) <= 0 || currentMachine?.paperStatus === 'empty';
+  const isMachineOperational = isMachineOnline && !isMachineMaintenance && !isPaperOut;
+
+  const machineSupportsBw = currentMachine?.supportsBw ?? true;
+  const machineSupportsColor = currentMachine?.supportsColor ?? false;
+  const machineSupportsDuplex = currentMachine?.supportsDuplex ?? true;
+
+  // Auto-enforce machine hardware constraints on loaded files
+  useEffect(() => {
+    if (!currentMachine) return;
+    if (!machineSupportsColor) {
+      setFilesList(prev => prev.map(f => f.colorMode === 'color' ? { ...f, colorMode: 'bw' } : f));
+    }
+    if (!machineSupportsDuplex) {
+      setFilesList(prev => prev.map(f => f.duplexMode === 'duplex' ? { ...f, duplexMode: 'simplex' } : f));
+    }
+  }, [machineSupportsColor, machineSupportsDuplex, currentMachine]);
 
   // Generate QR Code data URL when activeOrder is set
   useEffect(() => {
@@ -1413,6 +1438,17 @@ export default function QwikprintAuthenticApp() {
 
   // Check if customer name and valid 10-digit phone exist before proceeding to summary
   const handleProceedClick = () => {
+    if (!isMachineOperational) {
+      sounds.error();
+      alert(
+        isMachineMaintenance
+          ? 'This Print ATM kiosk is currently under maintenance. Orders are temporarily paused.'
+          : isPaperOut
+          ? 'This Print ATM kiosk is currently out of paper. Orders will resume shortly once refilled.'
+          : 'This Print ATM is currently unavailable. Orders are temporarily paused. Please check back shortly or choose another kiosk.'
+      );
+      return;
+    }
     sounds.keyPress();
     const cleaned = (customerPhone || phoneInput || '').replace(/\D/g, '');
     const hasName = Boolean((customerName || nameInput || '').trim());
@@ -1426,6 +1462,18 @@ export default function QwikprintAuthenticApp() {
 
   // Checkout & Pay via Razorpay (Supports UPI, GPay, PhonePe, Cards, NetBanking)
   const handlePayAndGeneratePin = async (overrideCustomer?: { phone?: string; name?: string } | React.MouseEvent) => {
+    if (!isMachineOperational) {
+      sounds.error();
+      alert(
+        isMachineMaintenance
+          ? 'This Print ATM kiosk is currently under maintenance. New orders cannot be accepted right now.'
+          : isPaperOut
+          ? 'This Print ATM kiosk is currently out of paper. Orders will resume shortly once refilled.'
+          : 'This Print ATM is currently unavailable. Orders are temporarily paused. Please check back shortly or choose another kiosk.'
+      );
+      return;
+    }
+
     if (filesList.length === 0 && blankSheetCount === 0) return;
 
     const isClickEvent = overrideCustomer && typeof overrideCustomer === 'object' && 'preventDefault' in overrideCustomer;
@@ -1580,67 +1628,126 @@ export default function QwikprintAuthenticApp() {
         </div>
       </header>
 
-      {/* ================= LOCATION SELECTOR STRIP (Cleanly Below Header) ================= */}
-      <div className="w-full max-w-7xl mx-auto px-4 sm:px-8 pt-1 pb-2 flex items-center justify-center shrink-0">
+      {/* ================= DESIGNATED CAMPUS PRINT ATM KIOSK SELECTOR ================= */}
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-8 pt-1.5 pb-2 flex items-center justify-center shrink-0">
         <div className="relative inline-block">
           <button
             type="button"
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-            className="inline-flex items-center gap-1.5 xs:gap-2 px-3.5 py-1.5 rounded-full bg-white/90 hover:bg-white border border-slate-200/90 hover:border-blue-300 shadow-2xs hover:shadow-xs text-left group cursor-pointer transition-all backdrop-blur-xs"
+            className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/95 hover:bg-white border shadow-xs hover:shadow-sm text-left group cursor-pointer transition-all backdrop-blur-xs ${
+              !isMachineOperational
+                ? 'border-red-300 ring-2 ring-red-500/20'
+                : 'border-slate-200/90 hover:border-blue-400'
+            }`}
           >
+            {/* Live Operational Status Indicator */}
+            {isMachineOperational ? (
+              <span className="flex h-2.5 w-2.5 relative shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+              </span>
+            ) : isMachineMaintenance ? (
+              <span className="h-2.5 w-2.5 rounded-full bg-amber-500 shrink-0" />
+            ) : isPaperOut ? (
+              <span className="h-2.5 w-2.5 rounded-full bg-orange-500 shrink-0" />
+            ) : (
+              <span className="h-2.5 w-2.5 rounded-full bg-rose-500 shrink-0" />
+            )}
+
             <MapPin className="w-3.5 h-3.5 text-[#2563eb] shrink-0" />
-            <span className="font-bold text-xs sm:text-sm text-slate-900 group-hover:text-[#2563eb] transition-colors truncate max-w-[210px] xs:max-w-[320px] sm:max-w-none">
-              {currentMachine?.displayName?.replace(/^Print ATM\s*-\s*/i, '') || 'Main Campus Hub'}
-            </span>
+
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="font-extrabold text-xs sm:text-sm text-slate-900 group-hover:text-[#2563eb] transition-colors truncate max-w-[190px] xs:max-w-[290px] sm:max-w-none">
+                {currentMachine?.displayName || 'Print ATM - Main Campus Hub'}
+              </span>
+              <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200/60 shrink-0">
+                {currentMachine?.machineCode || 'RIT-ATM-01'}
+              </span>
+              {!isMachineOperational && (
+                <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-red-100 text-red-700 border border-red-200 shrink-0">
+                  {isMachineMaintenance ? 'Maintenance' : isPaperOut ? 'No Paper' : 'Unavailable'}
+                </span>
+              )}
+            </div>
+
             <ChevronDown className={`h-3 w-3 text-slate-400 group-hover:text-[#2563eb] shrink-0 transition-transform ${isDropdownOpen ? 'rotate-180 text-[#2563eb]' : ''}`} />
           </button>
 
-          {/* Dropdown Menu with Click-Away Backdrop */}
+          {/* Authentic Campus Kiosk Selector Dropdown */}
           {isDropdownOpen && (
             <>
               <div
                 className="fixed inset-0 z-40"
                 onClick={() => setIsDropdownOpen(false)}
               />
-              <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-72 xs:w-80 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl z-50 animate-fade-in">
-                <span className="px-3 py-1.5 text-[10px] font-bold uppercase text-slate-400 block">Select Print ATM Kiosk:</span>
-                {machines.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedMachineCode(m.machineCode);
-                      setIsDropdownOpen(false);
-                    }}
-                    className={`w-full rounded-xl px-3 py-2 text-left text-xs transition-colors flex items-center justify-between cursor-pointer ${
-                      selectedMachineCode === m.machineCode
-                        ? 'bg-blue-50 font-bold text-[#2563eb]'
-                        : 'text-slate-700 hover:bg-slate-50'
-                    }`}
-                  >
-                    <div>
-                      <p className="font-semibold">{m.displayName}</p>
-                      <p className="text-[10px] text-slate-400">{m.locationDescription}</p>
-                    </div>
-                    <span className="text-[10px] font-bold text-blue-600 font-mono">
-                      {m.currentSheetsRemaining} sheets
-                    </span>
-                  </button>
-                ))}
+              <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-80 xs:w-96 rounded-2xl border border-slate-200 bg-white p-2.5 shadow-2xl z-50 animate-fade-in">
+                <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-100 mb-1.5">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                    Designated Campus Print ATM
+                  </span>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                    isMachineOperational
+                      ? 'text-emerald-700 bg-emerald-50 border-emerald-200/60'
+                      : 'text-rose-700 bg-rose-50 border-rose-200/60'
+                  }`}>
+                    {isMachineOperational ? '🟢 Live System' : '🔴 System Paused'}
+                  </span>
+                </div>
 
-                {/* Link to Dedicated Select Location Map Page */}
-                <div className="pt-2 border-t border-slate-100 mt-1">
-                  <Link
-                    href="/select-location"
-                    onClick={() => setIsDropdownOpen(false)}
-                    className="w-full rounded-xl px-3 py-2 text-xs font-bold text-[#2563eb] bg-blue-50 hover:bg-blue-100 flex items-center justify-between transition-colors shadow-2xs"
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <MapPin className="w-3.5 h-3.5 text-[#2563eb]" />
-                      <span>Find Nearest Kiosk on Map</span>
-                    </span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </Link>
+                {machines && machines.length > 0 ? (
+                  machines.map((m) => {
+                    const isSelected = selectedMachineCode === m.machineCode;
+                    return (
+                      <button
+                        key={m.id || m.machineCode}
+                        type="button"
+                        onClick={() => {
+                          setSelectedMachineCode(m.machineCode);
+                          setCurrentMachine(m);
+                          setIsDropdownOpen(false);
+                        }}
+                        className={`w-full rounded-xl p-3 text-left text-xs transition-all flex flex-col gap-1.5 cursor-pointer border ${
+                          isSelected
+                            ? 'bg-blue-50/70 border-blue-300 text-slate-900 shadow-2xs'
+                            : 'border-transparent text-slate-700 hover:bg-slate-50 hover:border-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            {m.status === 'online' ? (
+                              <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
+                            ) : (
+                              <span className="h-2 w-2 rounded-full bg-rose-500 shrink-0" />
+                            )}
+                            <p className="font-extrabold text-xs text-slate-900">{m.displayName}</p>
+                            <span className="font-mono text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">
+                              {m.machineCode}
+                            </span>
+                          </div>
+                          {isSelected && (
+                            <CheckCircle2 className="h-4 w-4 text-[#2563eb] shrink-0" />
+                          )}
+                        </div>
+
+                        <p className="text-[11px] text-slate-500 leading-snug pl-3.5">
+                          {m.locationDescription || 'Near Main Canteen & Central Library (Ground Floor), RIT Chennai'}
+                        </p>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="p-3 text-center text-xs text-slate-500">
+                    Connecting to Campus Print ATM Hub...
+                  </div>
+                )}
+
+                {/* Campus Assurance Footer */}
+                <div className="pt-2 border-t border-slate-100 mt-1.5 px-3 py-1.5 flex items-center justify-between text-[10px] text-slate-500 font-medium bg-slate-50/80 rounded-xl">
+                  <span className="flex items-center gap-1.5 text-[#2563eb] font-bold">
+                    <ShieldCheck className="w-3.5 h-3.5 text-[#2563eb]" />
+                    <span>Autonomous Self-Service Kiosk</span>
+                  </span>
+                  <span className="font-semibold text-slate-400">RIT Chennai</span>
                 </div>
               </div>
             </>
@@ -1676,20 +1783,59 @@ export default function QwikprintAuthenticApp() {
               </div>
             </div>
 
+            {/* OFFLINE / MAINTENANCE / NO-PAPER ALERT BANNER */}
+            {!isMachineOperational && (
+              <div className="rounded-2xl border-2 border-red-200 bg-gradient-to-r from-red-50 via-rose-50 to-white p-4 sm:p-5 text-red-900 shadow-sm flex items-start sm:items-center gap-3.5 animate-fade-in">
+                <div className="h-10 w-10 rounded-xl bg-red-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                  <AlertCircle className="h-6 w-6 stroke-[2.2]" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-[10px] font-black bg-red-200 text-red-900 px-2 py-0.5 rounded">
+                      {currentMachine?.machineCode || 'RIT-ATM-01'}
+                    </span>
+                    <h3 className="font-black text-sm sm:text-base text-red-950">
+                      {isMachineMaintenance
+                        ? 'Print ATM is in Maintenance Mode'
+                        : isPaperOut
+                        ? 'Print ATM Paper Tray is Empty'
+                        : 'Print ATM is Temporarily Unavailable'}
+                    </h3>
+                    <span className="text-[10px] font-bold uppercase tracking-wider bg-red-100 border border-red-300 text-red-700 px-2 py-0.5 rounded-full">
+                      Orders Paused
+                    </span>
+                  </div>
+                  <p className="text-xs text-red-700 mt-1 leading-relaxed font-medium">
+                    {isMachineMaintenance
+                      ? 'This station is undergoing scheduled maintenance. Orders are temporarily paused.'
+                      : isPaperOut
+                      ? 'The paper supply is currently empty. Orders will resume shortly once refilled.'
+                      : 'This kiosk is temporarily unavailable or switched off. Orders are paused until the machine comes back online.'}
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* 2. MAIN UPLOAD & BLANK SHEETS GRID (High-End Production UI) */}
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-stretch">
               {/* Main Document Dropzone (Spans 8 cols on desktop) */}
-              <div className="md:col-span-8 rounded-3xl border border-slate-200/90 bg-white p-5 sm:p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col justify-between space-y-4 hover:border-blue-300 transition-all">
+              <div className={`md:col-span-8 rounded-3xl border bg-white p-5 sm:p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col justify-between space-y-4 transition-all ${
+                !isMachineOperational ? 'border-red-200/90 bg-red-50/10' : 'border-slate-200/90 hover:border-blue-300'
+              }`}>
                 {/* Header Strip */}
                 <div className="flex items-center pb-3 border-b border-slate-100 gap-2">
                   <div className="flex items-start gap-2 sm:gap-2.5 min-w-0">
-                    <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0 mt-1 sm:mt-1.5" />
+                    <div className={`h-2 w-2 rounded-full shrink-0 mt-1 sm:mt-1.5 ${
+                      isMachineOperational ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'
+                    }`} />
                     <div className="min-w-0">
                       <h2 className="text-xs xs:text-sm sm:text-base font-black text-slate-900 leading-tight">
                         Upload Lab Records, Notes & Assignments
                       </h2>
                       <p className="text-[10px] xs:text-[11px] text-slate-400 font-medium mt-0.5">
-                        Zero-queue laser print • Auto-scaled for standard A4 record & assignment submissions
+                        {isMachineOperational 
+                          ? 'Zero-queue laser print • Auto-scaled for standard A4 record & assignment submissions'
+                          : 'Print ATM is currently unavailable. Orders cannot be accepted right now.'}
                       </p>
                     </div>
                   </div>
@@ -1697,8 +1843,25 @@ export default function QwikprintAuthenticApp() {
 
                 {/* Tactile Interactive Drop Target */}
                 <div
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full relative rounded-2xl border-2 border-dashed border-blue-300/80 hover:border-blue-600 bg-gradient-to-b from-[#f8fafd] to-white p-6 sm:p-8 cursor-pointer text-center group transition-all duration-300 shadow-inner flex flex-col items-center justify-center gap-3 overflow-hidden"
+                  onClick={() => {
+                    if (!isMachineOperational) {
+                      sounds.error();
+                      alert(
+                        isMachineMaintenance
+                          ? 'This Print ATM is under maintenance. New orders cannot be placed.'
+                          : isPaperOut
+                          ? 'This Print ATM is out of paper. Orders will resume shortly once refilled.'
+                          : 'This Print ATM is currently unavailable. Orders are temporarily paused. Please try again later.'
+                      );
+                      return;
+                    }
+                    fileInputRef.current?.click();
+                  }}
+                  className={`w-full relative rounded-2xl border-2 border-dashed p-6 sm:p-8 text-center group transition-all duration-300 shadow-inner flex flex-col items-center justify-center gap-3 overflow-hidden ${
+                    !isMachineOperational
+                      ? 'border-red-300/80 bg-red-50/30 cursor-not-allowed opacity-90'
+                      : 'border-blue-300/80 hover:border-blue-600 bg-gradient-to-b from-[#f8fafd] to-white cursor-pointer'
+                  }`}
                 >
                   {/* Subtle Background Accent Glow */}
                   <div className="absolute inset-0 bg-radial-gradient from-blue-50/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
@@ -1721,12 +1884,27 @@ export default function QwikprintAuthenticApp() {
 
                   {/* Main Call to Action */}
                   <div className="space-y-1 relative z-10">
-                    <div className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-extrabold text-xs shadow-md shadow-blue-500/25 group-hover:shadow-lg group-hover:shadow-blue-500/35 transition-all">
-                      <UploadCloud className="w-4 h-4 stroke-[2.4]" />
-                      <span>Select College Documents from Device</span>
+                    <div className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-extrabold text-xs shadow-md transition-all ${
+                      !isMachineOperational
+                        ? 'bg-red-600 text-white cursor-not-allowed shadow-red-500/25'
+                        : 'bg-[#2563eb] hover:bg-[#1d4ed8] text-white shadow-blue-500/25 group-hover:shadow-lg group-hover:shadow-blue-500/35'
+                    }`}>
+                      {!isMachineOperational ? (
+                        <>
+                          <AlertCircle className="w-4 h-4 stroke-[2.4]" />
+                          <span>Kiosk Unavailable — Orders Paused</span>
+                        </>
+                      ) : (
+                        <>
+                          <UploadCloud className="w-4 h-4 stroke-[2.4]" />
+                          <span>Select College Documents from Device</span>
+                        </>
+                      )}
                     </div>
                     <p className="text-xs text-slate-600 font-semibold pt-1">
-                      or drag & drop your Records, Notes & PPT slides here
+                      {!isMachineOperational 
+                        ? 'This Print ATM is temporarily unavailable. Please check back shortly.' 
+                        : 'or drag & drop your Records, Notes & PPT slides here'}
                     </p>
                   </div>
 
@@ -1746,6 +1924,17 @@ export default function QwikprintAuthenticApp() {
               {/* Blank A4 Sheets Dispenser Card (Spans 4 cols on desktop) */}
               <div 
                 onClick={() => {
+                  if (!isMachineOperational) {
+                    sounds.error();
+                    alert(
+                      isMachineMaintenance
+                        ? 'This Print ATM is under maintenance. Blank sheet dispensing is paused.'
+                        : isPaperOut
+                        ? 'This Print ATM is out of paper. Blank sheet dispensing is paused.'
+                        : 'This Print ATM is currently OFFLINE. Blank sheet dispensing is paused.'
+                    );
+                    return;
+                  }
                   sounds.keyPress();
                   setBlankSheetCount(0);
                   setCurrentStep('blank_sheets');
@@ -2055,13 +2244,21 @@ export default function QwikprintAuthenticApp() {
                       }
                     }}
                     className={`h-11 px-5 sm:px-6 rounded-xl font-bold text-xs sm:text-sm tracking-wide flex items-center justify-center gap-2 group transition-all ${
-                      blankSheetCount > 0
+                      !isMachineOperational
+                        ? 'bg-red-600 text-white cursor-not-allowed shadow-none'
+                        : blankSheetCount > 0
                         ? 'btn-primary-glow text-white cursor-pointer shadow-md shadow-blue-500/25'
                         : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
                     }`}
                   >
-                    <span>Proceed To Pay</span>
-                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                    {!isMachineOperational ? (
+                      <span>Kiosk Unavailable</span>
+                    ) : (
+                      <>
+                        <span>Proceed To Pay</span>
+                        <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                      </>
+                    )}
                   </button>
                 </div>
               </div>
@@ -2346,19 +2543,23 @@ export default function QwikprintAuthenticApp() {
                     <div className="grid grid-cols-2 gap-1.5">
                       <button
                         type="button"
+                        disabled={!machineSupportsBw}
                         onClick={() => {
+                          if (!machineSupportsBw) return;
                           sounds.keyPress();
                           updateActiveDoc({ colorMode: 'bw' });
                         }}
-                        className={`flex items-center justify-between px-2 py-1.5 rounded-lg border transition-all text-left cursor-pointer ${
-                          (activeDoc.colorMode || 'bw') === 'bw'
-                            ? 'border-[#2563eb] bg-blue-50 shadow-2xs ring-1 ring-[#2563eb]/30'
-                            : 'border-slate-200 bg-white hover:bg-slate-50'
+                        className={`flex items-center justify-between px-2 py-1.5 rounded-lg border transition-all text-left ${
+                          !machineSupportsBw
+                            ? 'opacity-40 cursor-not-allowed bg-slate-100 border-slate-200'
+                            : (activeDoc.colorMode || 'bw') === 'bw'
+                            ? 'border-[#2563eb] bg-blue-50 shadow-2xs ring-1 ring-[#2563eb]/30 cursor-pointer'
+                            : 'border-slate-200 bg-white hover:bg-slate-50 cursor-pointer'
                         }`}
                       >
                         <div>
                           <span className="font-bold text-xs text-slate-900 block">B/W</span>
-                          <span className="text-[9px] text-slate-500">₹2/pg</span>
+                          <span className="text-[9px] text-slate-500">{machineSupportsBw ? '₹2/pg' : 'Disabled'}</span>
                         </div>
                         <svg width="18" height="18" viewBox="0 0 28 28" fill="none" className="shrink-0">
                           <circle cx="14" cy="9.5" r="6" fill="#9ca3af" fillOpacity="0.85" />
@@ -2369,19 +2570,33 @@ export default function QwikprintAuthenticApp() {
 
                       <button
                         type="button"
+                        disabled={!machineSupportsColor}
                         onClick={() => {
+                          if (!machineSupportsColor) {
+                            sounds.error();
+                            alert('Color printing is currently disabled by admin on this kiosk station.');
+                            return;
+                          }
                           sounds.keyPress();
                           updateActiveDoc({ colorMode: 'color' });
                         }}
-                        className={`flex items-center justify-between px-2 py-1.5 rounded-lg border transition-all text-left cursor-pointer ${
-                          activeDoc.colorMode === 'color'
-                            ? 'border-[#2563eb] bg-blue-50 shadow-2xs ring-1 ring-[#2563eb]/30'
-                            : 'border-slate-200 bg-white hover:bg-slate-50'
+                        className={`flex items-center justify-between px-2 py-1.5 rounded-lg border transition-all text-left ${
+                          !machineSupportsColor
+                            ? 'opacity-40 cursor-not-allowed bg-slate-100 border-slate-200'
+                            : activeDoc.colorMode === 'color'
+                            ? 'border-[#2563eb] bg-blue-50 shadow-2xs ring-1 ring-[#2563eb]/30 cursor-pointer'
+                            : 'border-slate-200 bg-white hover:bg-slate-50 cursor-pointer'
                         }`}
+                        title={!machineSupportsColor ? 'Color printing disabled on this kiosk' : ''}
                       >
                         <div>
-                          <span className="font-bold text-xs text-slate-900 block">Color</span>
-                          <span className="text-[9px] text-slate-500">₹10/pg</span>
+                          <div className="flex items-center gap-1">
+                            <span className="font-bold text-xs text-slate-900 block">Color</span>
+                            {!machineSupportsColor && (
+                              <span className="text-[8px] font-extrabold text-amber-700 bg-amber-100 px-1 py-0.2 rounded">Off</span>
+                            )}
+                          </div>
+                          <span className="text-[9px] text-slate-500">{machineSupportsColor ? '₹10/pg' : 'Coming Soon'}</span>
                         </div>
                         <svg width="18" height="18" viewBox="0 0 28 28" fill="none" className="shrink-0">
                           <circle cx="14" cy="9.5" r="6" fill="#3b82f6" fillOpacity="0.92" />
@@ -2399,7 +2614,7 @@ export default function QwikprintAuthenticApp() {
                       : (activeDoc.pages || 1);
                     const activeCopies = Math.max(1, activeDoc.copies || 1);
                     const totalImpressions = activeEffectivePages * activeCopies;
-                    const isDuplexDisabled = totalImpressions <= 1;
+                    const isDuplexDisabled = totalImpressions <= 1 || !machineSupportsDuplex;
                     const isSinglePageMultiCopy = activeEffectivePages === 1 && activeCopies > 1;
 
                     return (
@@ -2408,9 +2623,11 @@ export default function QwikprintAuthenticApp() {
                           <span className="text-xs font-bold text-slate-900 block">
                             Duplex (Layout)
                           </span>
-                          {isDuplexDisabled && (
+                          {!machineSupportsDuplex ? (
+                            <span className="text-[10px] text-amber-600 font-bold bg-amber-50 px-1.5 py-0.2 rounded">Simplex Only</span>
+                          ) : isDuplexDisabled ? (
                             <span className="text-[10px] text-slate-400 font-medium">1 pg • 1 copy</span>
-                          )}
+                          ) : null}
                           {isSinglePageMultiCopy && (
                             <span className="text-[10px] text-blue-600 font-bold bg-blue-50 px-1.5 py-0.2 rounded">Back-to-back</span>
                           )}
@@ -2717,11 +2934,17 @@ export default function QwikprintAuthenticApp() {
 
                     <button
                       type="button"
-                      disabled={isProcessingPay}
+                      disabled={isProcessingPay || !isMachineOperational}
                       onClick={handleProceedClick}
-                      className="h-9 px-4 rounded-xl btn-primary-glow text-white font-bold text-xs tracking-wide flex items-center gap-1.5 cursor-pointer group disabled:opacity-50"
+                      className={`h-9 px-4 rounded-xl font-bold text-xs tracking-wide flex items-center gap-1.5 transition-all ${
+                        !isMachineOperational
+                          ? 'bg-red-600 text-white cursor-not-allowed shadow-none'
+                          : 'btn-primary-glow text-white cursor-pointer group disabled:opacity-50'
+                      }`}
                     >
-                      {isProcessingPay ? (
+                      {!isMachineOperational ? (
+                        <span>Kiosk Unavailable</span>
+                      ) : isProcessingPay ? (
                         <>
                           <RefreshCw className="h-3 w-3 animate-spin" />
                           <span>Preparing Order...</span>
@@ -2913,15 +3136,39 @@ export default function QwikprintAuthenticApp() {
                   </button>
                 </div>
 
-                {/* 3. Security & Kiosk Collection Info */}
-                <div className="p-4 rounded-2xl bg-blue-50/60 border border-blue-200/70 text-xs text-blue-900 space-y-1">
-                  <div className="flex items-center gap-1.5 font-bold">
-                    <ShieldCheck className="w-4 h-4 text-[#2563eb]" />
-                    <span>Instant Autonomous Pickup</span>
+                {/* 3. Designated Kiosk Pickup Terminal */}
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-50/90 via-slate-50/60 to-white border border-blue-200/90 text-xs text-slate-800 space-y-2.5 shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="h-8 w-8 rounded-xl bg-[#2563eb] text-white flex items-center justify-center shrink-0 shadow-2xs">
+                        <Printer className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#2563eb] block">
+                          Designated Pickup Terminal
+                        </span>
+                        <h4 className="font-black text-slate-900 text-xs sm:text-sm truncate">
+                          {currentMachine?.displayName || 'Print ATM - Main Campus Hub'}
+                        </h4>
+                      </div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-md font-mono text-[10px] font-extrabold bg-blue-100 text-blue-800 shrink-0">
+                      {currentMachine?.machineCode || 'RIT-ATM-01'}
+                    </span>
                   </div>
-                  <p className="text-[11px] text-slate-600 leading-relaxed">
-                    After payment, a 4-digit PIN will be issued immediately. Type the PIN on the touchscreen at <strong className="text-slate-800">{currentMachine?.displayName || 'the kiosk'}</strong> to collect your prints in 10 seconds.
+
+                  <p className="text-[11px] text-slate-600 flex items-center gap-1.5 pl-0.5">
+                    <MapPin className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                    <span>{currentMachine?.locationDescription || 'Near Main Canteen & Central Library (Ground Floor), RIT Chennai'}</span>
                   </p>
+
+                  <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-blue-100/80 text-slate-500 font-medium">
+                    <span className="text-slate-600 font-semibold">Autonomous Kiosk</span>
+                    <span className="inline-flex items-center gap-1 text-emerald-700 font-bold">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Ready for Instant PIN Release
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -2979,10 +3226,25 @@ export default function QwikprintAuthenticApp() {
                   <button
                     type="button"
                     onClick={() => handlePayAndGeneratePin()}
-                    disabled={isProcessingPay}
-                    className="w-full h-12 rounded-2xl btn-primary-glow text-white font-bold text-sm tracking-wide flex items-center justify-center gap-2 cursor-pointer group disabled:opacity-50 shadow-md shadow-blue-500/25 transition-all"
+                    disabled={isProcessingPay || !isMachineOperational}
+                    className={`w-full h-12 rounded-2xl text-white font-bold text-sm tracking-wide flex items-center justify-center gap-2 transition-all ${
+                      !isMachineOperational
+                        ? 'bg-red-600/90 cursor-not-allowed shadow-none'
+                        : 'btn-primary-glow cursor-pointer group shadow-md shadow-blue-500/25'
+                    }`}
                   >
-                    {isProcessingPay ? (
+                    {!isMachineOperational ? (
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="h-4 w-4" />
+                        <span>
+                          {isMachineMaintenance
+                            ? 'Kiosk in Maintenance — Orders Paused'
+                            : isPaperOut
+                            ? 'Paper Empty — Orders Paused'
+                            : 'Kiosk Unavailable — Orders Paused'}
+                        </span>
+                      </div>
+                    ) : isProcessingPay ? (
                       <div className="flex items-center gap-2">
                         <RefreshCw className="h-4 w-4 animate-spin" />
                         <span>Processing Payment...</span>
@@ -3193,18 +3455,24 @@ export default function QwikprintAuthenticApp() {
                   {/* Ticket Bottom Details */}
                   <div className="p-5 sm:p-6 bg-slate-50/60 space-y-3">
                     <div className="flex items-start gap-3">
-                      <div className="h-8 w-8 rounded-xl bg-emerald-100 text-[#2563eb] flex items-center justify-center shrink-0 mt-0.5">
-                        <MapPin className="h-4 w-4" />
+                      <div className="h-9 w-9 rounded-xl bg-blue-100 text-[#2563eb] flex items-center justify-center shrink-0 mt-0.5">
+                        <Printer className="h-5 w-5" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                          Pickup Terminal
-                        </span>
-                        <p className="text-xs sm:text-sm font-extrabold text-slate-900 truncate">
-                          {activeOrder.machineName || currentMachine?.displayName || 'Library Ground Floor Kiosk 01'}
+                        <div className="flex items-center gap-1.5 justify-between">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600">
+                            Designated Pickup Kiosk
+                          </span>
+                          <span className="font-mono text-[10px] font-extrabold bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">
+                            {activeOrder?.machineCode || currentMachine?.machineCode || 'RIT-ATM-01'}
+                          </span>
+                        </div>
+                        <p className="text-xs sm:text-sm font-black text-slate-900 truncate mt-0.5">
+                          {activeOrder?.machineName || currentMachine?.displayName || 'Print ATM - Main Campus Hub'}
                         </p>
-                        <p className="text-[11px] text-slate-500 font-medium">
-                          {currentMachine?.organizationName || 'RIT CHENNAI'} • Self-Service Terminal
+                        <p className="text-[11px] text-slate-600 font-medium flex items-center gap-1 mt-0.5">
+                          <MapPin className="h-3 w-3 text-blue-600 shrink-0" />
+                          <span>{currentMachine?.locationDescription || 'Near Main Canteen & Central Library (Ground Floor), RIT Chennai'}</span>
                         </p>
                       </div>
                     </div>
@@ -3412,11 +3680,17 @@ export default function QwikprintAuthenticApp() {
 
             <button
               type="button"
-              disabled={isProcessingPay}
+              disabled={isProcessingPay || !isMachineOperational}
               onClick={handleProceedClick}
-              className="h-12 px-7 rounded-2xl btn-primary-glow text-white font-bold text-sm tracking-wide flex items-center justify-center gap-2 cursor-pointer group disabled:opacity-50"
+              className={`h-12 px-7 rounded-2xl font-bold text-sm tracking-wide flex items-center justify-center gap-2 transition-all ${
+                !isMachineOperational
+                  ? 'bg-red-600 text-white cursor-not-allowed shadow-none'
+                  : 'btn-primary-glow text-white cursor-pointer group disabled:opacity-50'
+              }`}
             >
-              {isProcessingPay ? (
+              {!isMachineOperational ? (
+                <span>Kiosk Unavailable</span>
+              ) : isProcessingPay ? (
                 <>
                   <RefreshCw className="h-4 w-4 animate-spin" />
                   <span>Preparing Order...</span>
@@ -4119,6 +4393,111 @@ export default function QwikprintAuthenticApp() {
               className="mt-6 w-full py-3 rounded-2xl bg-[#2563eb] text-white font-bold text-xs shadow-md shadow-blue-500/25 hover:bg-[#1d4ed8] transition-all cursor-pointer"
             >
               Got It
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: DESIGNATED CAMPUS PRINT ATM KIOSK SELECTOR ================= */}
+      {showStationModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-fade-in">
+          <div className="relative w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-5 sm:p-7 text-slate-900 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <button
+              type="button"
+              onClick={() => setShowStationModal(false)}
+              className="absolute right-4 top-4 rounded-full bg-slate-100 p-2 text-slate-500 hover:text-slate-900 cursor-pointer transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            <div className="flex items-center gap-2.5">
+              <div className="h-9 w-9 rounded-xl bg-blue-50 text-[#2563eb] flex items-center justify-center border border-blue-100">
+                <Printer className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-base sm:text-lg font-black text-slate-900">
+                  RIT Autonomous Print ATM Stations
+                </h3>
+                <p className="text-xs text-slate-500 font-medium">
+                  Select your nearest campus kiosk for instant 4-digit PIN collection
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3 pt-1">
+              {machines && machines.length > 0 ? (
+                machines.map((m) => {
+                  const isSelected = selectedMachineCode === m.machineCode;
+                  return (
+                    <button
+                      key={m.id || m.machineCode}
+                      type="button"
+                      onClick={() => {
+                        setSelectedMachineCode(m.machineCode);
+                        setCurrentMachine(m);
+                        setShowStationModal(false);
+                      }}
+                      className={`w-full rounded-2xl p-4 text-left transition-all border cursor-pointer space-y-2 ${
+                        isSelected
+                          ? 'bg-blue-50/80 border-blue-400 shadow-xs ring-2 ring-blue-500/20'
+                          : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-[10px] font-extrabold bg-[#2563eb] text-white px-2 py-0.5 rounded-md">
+                            {m.machineCode}
+                          </span>
+                          <h4 className="font-black text-sm text-slate-900">
+                            {m.displayName}
+                          </h4>
+                          {m.status === 'online' ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                              Online & Ready
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                              <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+                              Offline
+                            </span>
+                          )}
+                        </div>
+                        {isSelected && (
+                          <div className="h-6 w-6 rounded-full bg-[#2563eb] text-white flex items-center justify-center shrink-0">
+                            <Check className="h-3.5 w-3.5 stroke-[3]" />
+                          </div>
+                        )}
+                      </div>
+
+                      <p className="text-xs text-slate-600 font-medium flex items-center gap-1.5">
+                        <MapPin className="h-3.5 w-3.5 text-[#2563eb] shrink-0" />
+                        <span>{m.locationDescription || 'Campus Ground Floor Hub, RIT Chennai'}</span>
+                      </p>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="p-4 text-center text-xs text-slate-500">
+                  Connecting to Campus Print ATM Hub...
+                </div>
+              )}
+            </div>
+
+            <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-between text-[11px] text-slate-600">
+              <div className="flex items-center gap-1.5 text-[#2563eb] font-bold">
+                <ShieldCheck className="h-4 w-4" />
+                <span>Instant Touchscreen PIN Pickup</span>
+              </div>
+              <span className="text-[10px] text-slate-400">Rajalakshmi Institute of Technology</span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowStationModal(false)}
+              className="w-full py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
+            >
+              Close
             </button>
           </div>
         </div>

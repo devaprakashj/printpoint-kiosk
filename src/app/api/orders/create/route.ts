@@ -46,6 +46,64 @@ export async function POST(req: NextRequest) {
           machineCode: mData.machine_code,
           displayName: mData.display_name,
         };
+
+        // STRICT OPERATIONAL CHECK: Machine MUST be online and NOT in maintenance
+        const isHeartbeatFresh = Boolean(
+          mData.last_heartbeat_at &&
+          (Date.now() - new Date(mData.last_heartbeat_at).getTime() < 45000)
+        );
+
+        if (mData.status === 'maintenance') {
+          return NextResponse.json({
+            success: false,
+            error: 'This Print ATM kiosk is currently under maintenance. Orders are temporarily paused.',
+          }, { status: 400 });
+        }
+
+        if (!isHeartbeatFresh || mData.status === 'offline') {
+          return NextResponse.json({
+            success: false,
+            error: 'This Print ATM kiosk is currently unavailable. Orders are temporarily paused. Please check back shortly or choose another kiosk.',
+          }, { status: 400 });
+        }
+
+        if ((mData.current_sheets_remaining ?? 500) <= 0 || mData.paper_status === 'empty') {
+          return NextResponse.json({
+            success: false,
+            error: 'Print ATM paper tray is empty. Please contact campus coordinator to refill paper.',
+          }, { status: 400 });
+        }
+
+        // HARDWARE CAPABILITY ENFORCEMENT
+        if (mData.supports_color === false) {
+          const hasColor = Array.isArray(documents) && documents.some((d: any) => d.colorMode === 'color');
+          if (hasColor || colorMode === 'color') {
+            return NextResponse.json({
+              success: false,
+              error: 'Color printing is currently disabled by admin on this kiosk station.',
+            }, { status: 400 });
+          }
+        }
+
+        if (mData.supports_duplex === false) {
+          const hasDuplex = Array.isArray(documents) && documents.some((d: any) => d.duplexMode === 'duplex');
+          if (hasDuplex || duplexMode === 'duplex') {
+            return NextResponse.json({
+              success: false,
+              error: 'Duplex (double-sided) printing is currently disabled on this kiosk station.',
+            }, { status: 400 });
+          }
+        }
+
+        if (mData.supports_bw === false) {
+          const hasBw = Array.isArray(documents) && documents.some((d: any) => d.colorMode === 'bw');
+          if (hasBw || colorMode === 'bw') {
+            return NextResponse.json({
+              success: false,
+              error: 'B&W laser printing is currently disabled on this kiosk station.',
+            }, { status: 400 });
+          }
+        }
       }
     }
 

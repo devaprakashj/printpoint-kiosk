@@ -73,6 +73,7 @@ class PrintAtmStore {
   private pricingRules: PricingRule[] = [...SEED_PRICING_RULES];
   private orders: PrintOrder[] = [];
   private telemetryLogs: SensorTelemetry[] = [];
+  private pendingHardwareJobs: Record<string, any[]> = {};
 
   constructor() {
     // 100% Production Clean: No mock orders or demo transactions
@@ -242,11 +243,33 @@ class PrintAtmStore {
     }
     return undefined;
   }
+
+  // Hardware Print Queue for Kiosk Daemons
+  enqueueHardwareJob(machineCode: string, job: any): void {
+    const code = machineCode.toUpperCase();
+    if (!this.pendingHardwareJobs[code]) {
+      this.pendingHardwareJobs[code] = [];
+    }
+    this.pendingHardwareJobs[code].push({
+      ...job,
+      enqueuedAt: new Date().toISOString(),
+    });
+  }
+
+  popHardwareJobs(machineCode: string): any[] {
+    const code = machineCode.toUpperCase();
+    const jobs = this.pendingHardwareJobs[code] || [];
+    this.pendingHardwareJobs[code] = [];
+    return jobs;
+  }
 }
 
 // Global Singleton Instance
 const globalObj = global as unknown as { __printAtmStore?: PrintAtmStore };
-export const db: PrintAtmStore = globalObj.__printAtmStore ?? new PrintAtmStore();
+if (!globalObj.__printAtmStore || typeof (globalObj.__printAtmStore as any).popHardwareJobs !== 'function') {
+  globalObj.__printAtmStore = new PrintAtmStore();
+}
+export const db: PrintAtmStore = globalObj.__printAtmStore;
 
 if (process.env.NODE_ENV !== 'production') {
   globalObj.__printAtmStore = db;
