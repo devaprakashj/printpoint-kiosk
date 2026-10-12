@@ -469,7 +469,7 @@ export default function SmartPrintOpsConsole() {
       });
       const data = await res.json();
       if (data.success) {
-        showToast(`Hardware alignment test print sent to ${machineCode}!`);
+        showToast(`Hardware test print sent to ${machineCode}! Printer paper feeder activated.`);
       }
     } catch {
       showToast('Failed to trigger test print', 'error');
@@ -977,13 +977,16 @@ export default function SmartPrintOpsConsole() {
                   <div className="p-4 rounded-xl bg-white border border-slate-200 shadow-2xs space-y-1">
                     <p className="text-xs font-medium text-slate-500">Active Printers</p>
                     <p className="text-2xl font-bold text-slate-900 tracking-tight">
-                      {machinesList.some((m: any) => m.activePrinterStatus === 'connected') ? '1 Connected' : '0 Connected'}
+                      {machinesList.filter((m: any) => m.activePrinterStatus === 'connected').length} Connected
                     </p>
                     <p className={`text-[11px] font-medium flex items-center gap-1 ${
                       machinesList.some((m: any) => m.activePrinterStatus === 'connected') ? 'text-emerald-600' : 'text-amber-600'
                     }`}>
                       <span className={`h-1.5 w-1.5 rounded-full ${machinesList.some((m: any) => m.activePrinterStatus === 'connected') ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                      {machinesList.some((m: any) => m.activePrinterStatus === 'connected') ? 'HP LaserJet USB Online' : 'HP Laser USB Unplugged'}
+                      {(() => {
+                        const connected = machinesList.find((m: any) => m.activePrinterStatus === 'connected');
+                        return connected ? `${connected.defaultPrinterModel || connected.printerSpoolerName || 'USB Printer'} Online` : 'No Printer Connected';
+                      })()}
                     </p>
                   </div>
 
@@ -1838,113 +1841,72 @@ export default function SmartPrintOpsConsole() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* HP LaserJet */}
-                  {(() => {
-                    const ritMachine = machinesList.find((m: any) => m.machineCode === 'RIT-ATM-01') || machinesList[0];
-                    const isHpOnline = ritMachine?.activePrinterStatus === 'connected';
+                  {machinesList.map((m: any) => {
+                    const isPrinterOnline = m.activePrinterStatus === 'connected';
+                    const printerName = isPrinterOnline 
+                      ? (m.defaultPrinterModel || m.printerSpoolerName || 'Connected USB Printer')
+                      : (m.defaultPrinterModel ? `${m.defaultPrinterModel} (Unplugged)` : 'No Printer Attached');
 
                     return (
-                      <div className="p-5 rounded-xl bg-white border border-slate-200 shadow-2xs space-y-4">
+                      <div key={m.id} className="p-5 rounded-xl bg-white border border-slate-200 shadow-2xs space-y-4">
                         <div className="flex items-start justify-between">
                           <div>
-                            <h2 className="text-sm font-bold text-slate-900">HP LaserJet Professional P1106</h2>
-                            <p className="text-xs text-slate-400">Primary High-Speed B&amp;W Spooler &bull; RIT-ATM-01</p>
+                            <h2 className="text-sm font-bold text-slate-900">{printerName}</h2>
+                            <p className="text-xs text-slate-400">Assigned Kiosk &bull; {m.displayName || m.machineCode}</p>
                           </div>
                           <span className={`text-[11px] font-semibold flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border ${
-                            isHpOnline
+                            isPrinterOnline
                               ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                               : 'bg-amber-50 text-amber-700 border-amber-200'
                           }`}>
-                            <span className={`h-1.5 w-1.5 rounded-full ${isHpOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-                            <span>{isHpOnline ? 'Online (USB Ready)' : 'Offline (USB Unplugged)'}</span>
+                            <span className={`h-1.5 w-1.5 rounded-full ${isPrinterOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                            <span>{isPrinterOnline ? 'Online (USB Plugged)' : 'Offline (USB Unplugged)'}</span>
                           </span>
                         </div>
 
                         <div className="grid grid-cols-2 gap-2 text-xs">
                           <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
                             <p className="text-slate-400 text-[10px]">Port / Connection</p>
-                            <p className="font-semibold text-slate-800 mt-0.5 font-mono">USB001</p>
+                            <p className="font-semibold text-slate-800 mt-0.5 font-mono">{m.printerPortOrIp || 'USB'}</p>
                           </div>
                           <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
-                            <p className="text-slate-400 text-[10px]">Cable Hardware</p>
-                            <p className={`font-semibold mt-0.5 ${isHpOnline ? 'text-emerald-700' : 'text-amber-700'}`}>
-                              {isHpOnline ? 'Physically Plugged' : 'Cable Disconnected'}
+                            <p className="text-slate-400 text-[10px]">Physical USB</p>
+                            <p className={`font-semibold mt-0.5 ${isPrinterOnline ? 'text-emerald-700' : 'text-amber-700'}`}>
+                              {isPrinterOnline ? 'Physically Plugged' : 'Cable Disconnected'}
                             </p>
                           </div>
                           <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
-                            <p className="text-slate-400 text-[10px]">Paper Tray Feed</p>
-                            <p className="font-semibold text-slate-800 mt-0.5 font-mono">{ritMachine?.currentSheetsRemaining || 500} sheets</p>
+                            <p className="text-slate-400 text-[10px]">Paper Tray Stock</p>
+                            <p className="font-semibold text-slate-800 mt-0.5 font-mono">{m.currentSheetsRemaining ?? 500} sheets</p>
                           </div>
                           <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
-                            <p className="text-slate-400 text-[10px]">Queue Mode</p>
-                            <p className="font-semibold text-slate-800 mt-0.5">{isHpOnline ? 'Live USB Feeder' : 'Safe Dry-Run Spool'}</p>
+                            <p className="text-slate-400 text-[10px]">Spooler Status</p>
+                            <p className="font-semibold text-slate-800 mt-0.5">{isPrinterOnline ? 'Live Hardware Ready' : 'Spooler Paused'}</p>
                           </div>
                         </div>
+
                         <div className="pt-1 flex items-center gap-2">
                           <button
-                            onClick={() => handleTriggerTestPrint('RIT-ATM-01')}
-                            className="flex-1 py-1.5 px-3 rounded-lg bg-slate-900 text-white hover:bg-black font-medium text-xs transition-colors cursor-pointer text-center"
+                            onClick={() => handleTriggerTestPrint(m.machineCode)}
+                            disabled={!isPrinterOnline}
+                            className={`flex-1 py-1.5 px-3 rounded-lg font-medium text-xs transition-colors cursor-pointer text-center ${
+                              isPrinterOnline 
+                                ? 'bg-slate-900 text-white hover:bg-black' 
+                                : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                            }`}
                           >
                             Print Test Sheet
                           </button>
                           <button
-                            onClick={() => showToast('HP LaserJet Spooler refreshed!')}
+                            onClick={() => showToast(`Refreshed ${m.machineCode} print queue!`)}
                             className="py-1.5 px-3 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 font-medium text-xs transition-colors cursor-pointer"
                           >
-                            Flush Queue
+                            Refresh Status
                           </button>
                         </div>
                       </div>
                     );
-                  })()}
-
-                  {/* Epson Color */}
-                  <div className="p-5 rounded-xl bg-white border border-slate-200 shadow-2xs space-y-4">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h2 className="text-sm font-bold text-slate-900">Epson L3250 Series</h2>
-                        <p className="text-xs text-slate-400">Color Ink Tank Photo &amp; Document Spooler</p>
-                      </div>
-                      <span className="text-[11px] font-medium text-emerald-600 flex items-center gap-1">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                        Online
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
-                        <p className="text-slate-400 text-[10px]">Port</p>
-                        <p className="font-semibold text-slate-800 mt-0.5 font-mono">USB002</p>
-                      </div>
-                      <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
-                        <p className="text-slate-400 text-[10px]">Ink Levels</p>
-                        <p className="font-semibold text-slate-800 mt-0.5">CMYK Ready (95%)</p>
-                      </div>
-                      <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
-                        <p className="text-slate-400 text-[10px]">Lifetime Spooled</p>
-                        <p className="font-semibold text-slate-800 mt-0.5 font-mono">6,430 sheets</p>
-                      </div>
-                      <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
-                        <p className="text-slate-400 text-[10px]">Queue</p>
-                        <p className="font-semibold text-slate-800 mt-0.5">0 jobs (Idle)</p>
-                      </div>
-                    </div>
-
-                    <div className="pt-1 flex items-center gap-2">
-                      <button
-                        onClick={() => handleTriggerTestPrint('RIT-ATM-01')}
-                        className="flex-1 py-1.5 px-3 rounded-lg bg-slate-900 text-white hover:bg-black font-medium text-xs transition-colors cursor-pointer text-center"
-                      >
-                        Print Test Sheet
-                      </button>
-                      <button
-                        onClick={() => showToast('Epson Nozzle check spooled!')}
-                        className="py-1.5 px-3 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 font-medium text-xs transition-colors cursor-pointer"
-                      >
-                        Nozzle Check
-                      </button>
-                    </div>
-                  </div>
+                  })}
                 </div>
               </div>
             )}
@@ -2019,7 +1981,7 @@ export default function SmartPrintOpsConsole() {
                                 : 'bg-amber-50 text-amber-700 border-amber-200'
                             }`}>
                               <Printer className="h-3 w-3" />
-                              <span>{m.activePrinterStatus === 'connected' ? 'HP Laser USB OK' : 'Printer Unplugged'}</span>
+                              <span>{m.activePrinterStatus === 'connected' ? `${m.defaultPrinterModel || m.printerSpoolerName || 'Printer'} OK` : 'Printer Unplugged'}</span>
                             </span>
                           </div>
                         </div>
@@ -2282,7 +2244,7 @@ export default function SmartPrintOpsConsole() {
                                 onChange={(e) => setNewMachineForm({ ...newMachineForm, supportsBw: e.target.checked })}
                                 className="h-4 w-4 rounded text-blue-600 border-slate-300"
                               />
-                              <span>Black &amp; White Laser (HP LaserJet P1106)</span>
+                              <span>Black &amp; White Laser Printing</span>
                             </label>
 
                             <label className="flex items-center gap-2 cursor-pointer text-slate-800">
@@ -2292,7 +2254,7 @@ export default function SmartPrintOpsConsole() {
                                 onChange={(e) => setNewMachineForm({ ...newMachineForm, supportsColor: e.target.checked })}
                                 className="h-4 w-4 rounded text-blue-600 border-slate-300"
                               />
-                              <span>Color Photo &amp; Ink Tank (Epson L3250)</span>
+                              <span>Color Photo &amp; Document Printing</span>
                             </label>
 
                             <label className="flex items-center gap-2 cursor-pointer text-slate-800">

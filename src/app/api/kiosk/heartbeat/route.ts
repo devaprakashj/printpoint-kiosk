@@ -60,12 +60,16 @@ export async function POST(req: NextRequest) {
       if (existing) {
         targetMachine = existing;
 
-        // Filter for physical laser hardware, ignoring virtual software spoolers (OneNote/PDF)
-        const hpPrinter = Array.isArray(attachedPrinters)
-          ? attachedPrinters.find((p: any) => /HP|LaserJet|P1106/i.test(p.name))
+        // Detect any physical printer hardware, ignoring virtual software spoolers (OneNote/PDF/Fax/XPS)
+        const physicalPrinter = Array.isArray(attachedPrinters)
+          ? attachedPrinters.find((p: any) => {
+              const name = String(p.name || '');
+              const isVirtual = /onenote|pdf|xps|fax|root print queue|microsoft print to pdf/i.test(name);
+              return !isVirtual && Boolean(p.connected);
+            }) || attachedPrinters[0]
           : null;
         
-        const isPrinterConnected = hpPrinter ? Boolean(hpPrinter.connected) : false;
+        const isPrinterConnected = Boolean(physicalPrinter?.connected);
         const printerStatusValue = isPrinterConnected ? 'connected' : 'offline';
 
         const isPowerOff = Boolean(body.powerOff || body.status === 'offline');
@@ -78,6 +82,12 @@ export async function POST(req: NextRequest) {
           is_door_open: typeof isDoorOpen === 'boolean' ? isDoorOpen : false,
           active_printer_status: isPowerOff ? 'offline' : printerStatusValue,
         };
+
+        if (physicalPrinter?.name && isPrinterConnected) {
+          updateData.default_printer_model = physicalPrinter.name;
+          updateData.printer_spooler_name = physicalPrinter.name;
+          if (physicalPrinter.port) updateData.printer_port_or_ip = physicalPrinter.port;
+        }
 
         if (typeof currentSheetsRemaining === 'number') {
           updateData.current_sheets_remaining = currentSheetsRemaining;
@@ -97,10 +107,14 @@ export async function POST(req: NextRequest) {
 
     if (memMachine) {
       targetMachine = targetMachine || memMachine;
-      const hpPrinter = Array.isArray(attachedPrinters)
-        ? attachedPrinters.find((p: any) => /HP|LaserJet|P1106/i.test(p.name))
+      const physicalPrinter = Array.isArray(attachedPrinters)
+        ? attachedPrinters.find((p: any) => {
+            const name = String(p.name || '');
+            const isVirtual = /onenote|pdf|xps|fax|root print queue|microsoft print to pdf/i.test(name);
+            return !isVirtual && Boolean(p.connected);
+          }) || attachedPrinters[0]
         : null;
-      const isPrinterConnected = hpPrinter ? Boolean(hpPrinter.connected) : false;
+      const isPrinterConnected = Boolean(physicalPrinter?.connected);
       const isPowerOff = Boolean(body.powerOff || body.status === 'offline');
 
       db.updateMachineStatus(cleanCode, {
@@ -109,6 +123,9 @@ export async function POST(req: NextRequest) {
         internalTempCelsius: typeof cpuTempCelsius === 'number' ? cpuTempCelsius : 28,
         tonerLevelPercent: typeof tonerLevelPercent === 'number' ? tonerLevelPercent : 100,
         activePrinterStatus: isPowerOff ? 'offline' : (isPrinterConnected ? 'connected' : 'offline'),
+        defaultPrinterModel: (isPrinterConnected && physicalPrinter?.name) ? physicalPrinter.name : memMachine.defaultPrinterModel,
+        printerSpoolerName: (isPrinterConnected && physicalPrinter?.name) ? physicalPrinter.name : memMachine.printerSpoolerName,
+        printerPortOrIp: physicalPrinter?.port || memMachine.printerPortOrIp || 'USB',
         ...(typeof currentSheetsRemaining === 'number' ? { currentSheetsRemaining } : {}),
       });
     }

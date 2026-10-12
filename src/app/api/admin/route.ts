@@ -447,6 +447,36 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, machine });
     }
 
+    if (action === 'trigger_test_print') {
+      const { machineCode } = payload || {};
+      const cleanCode = String(machineCode || 'RIT-ATM-01').trim().toUpperCase();
+
+      const testJobPayload = {
+        orderId: `test-print-${Date.now()}`,
+        orderNumber: `TEST-${Date.now().toString().slice(-4)}`,
+        fileName: 'PrintPoint_Hardware_Alignment_Test.txt',
+        fileStorageUrl: '',
+        downloadUrl: '',
+        pages: 1,
+        sheets: 1,
+        copies: 1,
+        colorMode: 'bw',
+        duplexMode: 'simplex',
+        paperSize: 'A4',
+        pin: 'TEST',
+        isTestPrint: true,
+        releasedAt: new Date().toISOString(),
+      };
+
+      db.enqueueHardwareJob(cleanCode, testJobPayload);
+
+      return NextResponse.json({
+        success: true,
+        message: `Hardware test print dispatched to ${cleanCode}. Spooler will feed alignment test sheet!`,
+        job: testJobPayload,
+      });
+    }
+
     if (action === 'toggle_capability') {
       const { machineCode, capability, enabled } = payload;
       const cleanCode = String(machineCode).trim().toUpperCase();
@@ -693,15 +723,6 @@ export async function POST(req: NextRequest) {
         success: true,
         message: `WhatsApp alert successfully dispatched to Kiosk Manager at +91 8667466390!`,
         result,
-      });
-    }
-
-    if (action === 'trigger_test_print') {
-      const { machineCode } = payload;
-      return NextResponse.json({
-        success: true,
-        message: `Hardware test page queued on Kiosk ${machineCode}!`,
-        timestamp: new Date().toISOString(),
       });
     }
 

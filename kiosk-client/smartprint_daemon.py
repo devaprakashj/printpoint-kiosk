@@ -21,9 +21,13 @@ import subprocess
 import urllib.request
 import urllib.error
 
-# Force line-buffering so logs appear in real-time immediately on Windows
+# Force line-buffering and UTF-8 with errors='replace' so emoji never crashes Windows cp1252 consoles
 if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(line_buffering=True)
+    try:
+        sys.stdout.reconfigure(line_buffering=True, encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(line_buffering=True, encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 if platform.system() == "Windows":
     os.system("")  # Enables ANSI escape sequences in Windows console
 
@@ -189,17 +193,18 @@ def download_job_file(server_url: str, download_url: str, order_number: str, fil
 
     # If test slip or simulated document
     sample_content = (
-        f"================================================================\n"
-        f"   RAJALAKSHMI INSTITUTE OF TECHNOLOGY - AUTONOMOUS PRINT ATM  \n"
-        f"================================================================\n"
-        f"Order Number : {order_number}\n"
-        f"Document     : {file_name}\n"
-        f"Timestamp    : {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"Machine Code : RIT-ATM-01 (Main Campus Hub)\n"
-        f"Spool Device : HP LaserJet Professional P1106 [USB001]\n"
-        f"Security     : DoD 5220.22-M Zero-Retention Guarantee\n"
-        f"Status       : PHYSICAL LASER PRINT OUTPUT VERIFIED\n"
-        f"================================================================\n"
+        f"================================================================\r\n"
+        f"   RAJALAKSHMI INSTITUTE OF TECHNOLOGY - AUTONOMOUS PRINT ATM  \r\n"
+        f"================================================================\r\n"
+        f"Job Type     : {'HARDWARE ALIGNMENT TEST PAGE' if 'TEST' in order_number else 'STUDENT PRINT ORDER'}\r\n"
+        f"Order Number : {order_number}\r\n"
+        f"Document     : {file_name}\r\n"
+        f"Timestamp    : {time.strftime('%Y-%m-%d %H:%M:%S')}\r\n"
+        f"Machine Code : RIT-ATM-01 (Main Campus Hub)\r\n"
+        f"Spool Status : HARDWARE PAPER FEED CONFIRMED\r\n"
+        f"Security     : DoD 5220.22-M Zero-Retention Guarantee\r\n"
+        f"================================================================\r\n\r\n"
+        f"-------------------- [ END OF TEST SHEET ] --------------------\r\n\x0c"
     ).encode("utf-8")
 
     with open(local_path, "wb") as f:
@@ -243,31 +248,71 @@ def dod_5220_shred_file(filepath: str) -> int:
     return size
 
 
-def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_physically_online: bool) -> tuple[bool, str]:
+def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_physically_online: bool, is_test_print: bool = False, is_duplex: bool = False, copies: int = 1) -> tuple[bool, str]:
     """
     Dispatches file to target printer spooler.
     Checks physical connectivity before attempting hardware paper feed.
+    If is_test_print is True, physically activates the hardware paper feeder.
+    Supports CUPS duplex and multi-copy routing on Linux / Raspberry Pi.
     """
     if not is_physically_online:
-        if print_real:
+        if print_real or is_test_print:
             return False, f"PHYSICAL ERROR: [{printer_name}] USB cable is UNPLUGGED or printer is POWERED OFF. Connect USB to print."
         else:
             return True, f"SIMULATION OK: Physical USB is UNPLUGGED. Virtual spooler tested without real paper."
 
-    if not print_real:
+    # If safe dry-run mode and not an explicit hardware test print, return virtual success
+    if not print_real and not is_test_print:
         return True, f"Virtual Spooler Ready for [{printer_name}] (Safe Dry-Run. Pass --print-real for physical feeder)"
 
     if platform.system() == "Windows":
+        # 1. Hardware Test Print Mode (Native Win32 PrintTestPage or Notepad /pt)
+        if is_test_print:
+            try:
+                safe_name = printer_name.replace("'", "''")
+                ps_script = (
+                    f"$pr = Get-CimInstance Win32_Printer | Where-Object {{ $_.Name -eq '{safe_name}' -or $_.Name -like '*{safe_name}*' }} | Select-Object -First 1; "
+                    f"if ($pr) {{ $res = Invoke-CimMethod -InputObject $pr -MethodName PrintTestPage; if ($res.ReturnValue -eq 0) {{ Write-Output 'OK' }} else {{ Write-Output ('ERR_' + $res.ReturnValue) }} }} else {{ Write-Output 'NOT_FOUND' }}"
+                )
+                res = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", ps_script],
+                    capture_output=True,
+                    text=True,
+                    timeout=15
+                )
+                output = res.stdout.strip()
+                if "OK" in output:
+                    return True, f"Sent Native Windows Test Page -> [{printer_name}] (Hardware Feeder Activated!)"
+            except Exception:
+                pass
+
+            # Fallback: Print alignment text slip directly to the printer using notepad /pt
+            try:
+                cmd = f'powershell -NoProfile -Command "Start-Process -FilePath notepad.exe -ArgumentList \'/pt \"\"{filepath}\"\" \"\"{printer_name}\"\"\' -Wait"'
+                subprocess.run(cmd, shell=True, check=True, timeout=12)
+                return True, f"Test Alignment Sheet Spooled -> [{printer_name}] (Paper Fed Successfully)"
+            except Exception as e:
+                return False, f"Test Print spool error: {e}"
+
+        # 2. Standard Document Print (PDF / File)
         try:
             cmd = f'powershell -NoProfile -Command "Start-Process -FilePath \'{filepath}\' -Verb PrintTo -ArgumentList \'\"{printer_name}\"\' -Wait"'
-            subprocess.run(cmd, shell=True, check=True, timeout=12)
+            subprocess.run(cmd, shell=True, check=True, timeout=15)
             return True, f"Sent to Physical Windows Spooler -> [{printer_name}]"
         except Exception as e:
             return False, f"Spooler error: {e}"
+
     elif platform.system() == "Linux":
+        # Linux (Raspberry Pi 5 with CUPS)
         try:
-            subprocess.run(["lp", "-d", printer_name, filepath], check=True, timeout=10)
-            return True, f"Sent to CUPS -> [{printer_name}]"
+            lp_cmd = ["lp", "-d", printer_name, "-n", str(max(1, int(copies)))]
+            if is_duplex:
+                lp_cmd.extend(["-o", "sides=two-sided-long-edge"])
+            else:
+                lp_cmd.extend(["-o", "sides=one-sided"])
+            lp_cmd.extend(["-o", "media=A4", filepath])
+            subprocess.run(lp_cmd, check=True, timeout=20)
+            return True, f"Sent to CUPS -> [{printer_name}] (Sides: {'Duplex' if is_duplex else 'Simplex'}, Copies: {copies})"
         except Exception as e:
             return False, f"CUPS error: {e}"
 
@@ -307,8 +352,9 @@ def main():
                 chosen_port = "USB"
 
                 if detected:
-                    hp_printers = [p for p in detected if "HP" in p["name"] or "LaserJet" in p["name"]]
-                    p_obj = hp_printers[0] if hp_printers else detected[0]
+                    real_printers = [p for p in detected if not any(v in p["name"].lower() for v in ["onenote", "pdf", "xps", "fax"])]
+                    online_printers = [p for p in real_printers if p.get("connected")]
+                    p_obj = online_printers[0] if online_printers else (real_printers[0] if real_printers else detected[0])
                     chosen_printer = args.printer or p_obj["name"]
                     is_physically_online = p_obj.get("connected", False)
                     chosen_port = p_obj.get("port", "USB")
@@ -317,10 +363,17 @@ def main():
                     order_num = job.get("orderNumber", "ORD-UNKNOWN")
                     file_name = job.get("fileName", "Document.pdf")
                     download_url = job.get("downloadUrl", "")
+                    is_test_print = bool(job.get("isTestPrint", False))
 
-                    print(f"\n{GREEN}{BOLD}================================================================{RESET}", flush=True)
-                    print(f"{GREEN}{BOLD}   🖨️  NEW PRINT JOB RELEASED FROM KIOSK TOUCHSCREEN!           {RESET}", flush=True)
-                    print(f"{GREEN}{BOLD}================================================================{RESET}", flush=True)
+                    if is_test_print:
+                        print(f"\n{YELLOW}{BOLD}================================================================{RESET}", flush=True)
+                        print(f"{YELLOW}{BOLD}   [*] HARDWARE TEST PRINT TRIGGERED FROM ADMIN OPS!           {RESET}", flush=True)
+                        print(f"{YELLOW}{BOLD}================================================================{RESET}", flush=True)
+                        print(f"  {BOLD}Job Type:{RESET}       {CYAN}ALIGNMENT & FEEDER TEST SHEET (Black & White){RESET}", flush=True)
+                    else:
+                        print(f"\n{GREEN}{BOLD}================================================================{RESET}", flush=True)
+                        print(f"{GREEN}{BOLD}   [*] NEW PRINT JOB RELEASED FROM KIOSK TOUCHSCREEN!           {RESET}", flush=True)
+                        print(f"{GREEN}{BOLD}================================================================{RESET}", flush=True)
                     print(f"  {BOLD}Order Number:{RESET}   {CYAN}{order_num}{RESET}", flush=True)
                     print(f"  {BOLD}Document:{RESET}       {file_name}", flush=True)
                     print(f"  {BOLD}Pages / Copy:{RESET}   {job.get('pages')} pages | {job.get('copies')} copy | {job.get('paperSize', 'A4')}", flush=True)
@@ -334,7 +387,9 @@ def main():
                     # 2. Spool to Target Printer with real hardware presence indicator
                     cable_status = f"{GREEN}[PHYSICALLY CONNECTED - {chosen_port}]{RESET}" if is_physically_online else f"{RED}[USB CABLE UNPLUGGED - Offline]{RESET}"
                     print(f"  {BOLD}Printer Target:{RESET}{YELLOW}{chosen_printer}{RESET} {cable_status}", flush=True)
-                    spool_ok, spool_msg = dispatch_to_printer(local_file, chosen_printer, args.print_real, is_physically_online)
+                    is_duplex = bool(job.get("duplexMode", "").lower() in ["duplex", "double", "two-sided"])
+                    copies_count = int(job.get("copies", 1))
+                    spool_ok, spool_msg = dispatch_to_printer(local_file, chosen_printer, args.print_real, is_physically_online, is_test_print=is_test_print, is_duplex=is_duplex, copies=copies_count)
                     time.sleep(0.5)
                     spool_color = GREEN if spool_ok else RED
                     print(f"  {BOLD}Hardware Spool:{RESET}{spool_color}[{'SUCCESS' if spool_ok else 'ALERT'}] {spool_msg}{RESET}", flush=True)

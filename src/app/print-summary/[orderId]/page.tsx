@@ -112,6 +112,17 @@ export default function PrintSummaryPage() {
           'Pragma': 'no-cache',
         },
       });
+      if (!res.ok) {
+        let errMsg = 'Order not found or expired';
+        try {
+          const errData = await res.json();
+          errMsg = errData.error || errMsg;
+        } catch {
+          errMsg = `Order request failed (status ${res.status})`;
+        }
+        if (!isSilent) setError(errMsg);
+        return;
+      }
       const data = await res.json();
       if (data.success && data.order) {
         setOrder((prev: any) => {
