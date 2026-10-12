@@ -352,7 +352,7 @@ def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_p
                 lp_cmd.extend(["-o", "sides=two-sided-long-edge", "-o", "Duplex=DuplexNoTumble"])
             else:
                 lp_cmd.extend(["-o", "sides=one-sided", "-o", "Duplex=None"])
-            lp_cmd.extend(["-o", "media=A4", "-o", "PageSize=A4", filepath])
+            lp_cmd.extend(["-o", "media=A4", "-o", "PageSize=A4", "-o", "InputSlot=Auto", "-o", "MediaType=Auto", filepath])
             res = subprocess.run(lp_cmd, check=True, timeout=20, capture_output=True, text=True)
             cups_out = res.stdout.strip() or f"request id is {printer_name} (1 file)"
 
