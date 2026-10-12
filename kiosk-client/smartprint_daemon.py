@@ -87,7 +87,7 @@ def get_ram_usage_percent() -> float:
     return 32.0
 
 
-def detect_connected_printers():
+def detect_connected_printers(preferred_printer: str = ""):
     """Detects real installed USB and Network printers with physical online/offline status."""
     printers = []
     if platform.system() == "Windows":
@@ -112,6 +112,17 @@ def detect_connected_printers():
             printers = [{"name": "Default Windows Spooler", "connected": True, "status": "ready"}]
     elif platform.system() == "Linux":
         try:
+            ports = {}
+            try:
+                v_out = subprocess.check_output(["lpstat", "-v"], text=True, stderr=subprocess.DEVNULL)
+                for line in v_out.splitlines():
+                    if line.startswith("device for "):
+                        parts = line[len("device for "):].split(":", 1)
+                        if len(parts) == 2:
+                            ports[parts[0].strip()] = parts[1].strip()
+            except Exception:
+                pass
+
             out = subprocess.check_output(["lpstat", "-p"], text=True, stderr=subprocess.DEVNULL)
             for line in out.splitlines():
                 if "printer" in line:
@@ -120,22 +131,27 @@ def detect_connected_printers():
                     printers.append({
                         "name": pname,
                         "connected": True,
-                        "status": "ready" if "idle" in line else "printing"
+                        "status": "ready" if "idle" in line else "printing",
+                        "port": ports.get(pname, "CUPS/Network"),
+                        "workOffline": False
                     })
         except Exception:
             printers = [{"name": "CUPS_Laser_P1106", "connected": True, "status": "ready"}]
     else:
         printers = [{"name": "Generic Kiosk Spooler", "connected": True, "status": "ready"}]
 
+    if preferred_printer:
+        printers.sort(key=lambda p: 0 if preferred_printer.lower() in p.get("name", "").lower() else 1)
+
     return printers
 
 
-def send_heartbeat(server_url: str, machine_code: str, daemon_token: str):
+def send_heartbeat(server_url: str, machine_code: str, daemon_token: str, preferred_printer: str = ""):
     """Sends telemetry payload to Next.js Cloud Heartbeat endpoint."""
     url = f"{server_url.rstrip('/')}/api/kiosk/heartbeat"
     cpu_temp = get_cpu_temp_celsius()
     ram_usage = get_ram_usage_percent()
-    printers = detect_connected_printers()
+    printers = detect_connected_printers(preferred_printer)
 
     payload = {
         "machineCode": machine_code,
@@ -307,10 +323,10 @@ def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_p
         try:
             lp_cmd = ["lp", "-d", printer_name, "-n", str(max(1, int(copies)))]
             if is_duplex:
-                lp_cmd.extend(["-o", "sides=two-sided-long-edge"])
+                lp_cmd.extend(["-o", "sides=two-sided-long-edge", "-o", "Duplex=DuplexNoTumble"])
             else:
-                lp_cmd.extend(["-o", "sides=one-sided"])
-            lp_cmd.extend(["-o", "media=A4", filepath])
+                lp_cmd.extend(["-o", "sides=one-sided", "-o", "Duplex=None"])
+            lp_cmd.extend(["-o", "media=A4", "-o", "PageSize=A4", filepath])
             subprocess.run(lp_cmd, check=True, timeout=20)
             return True, f"Sent to CUPS -> [{printer_name}] (Sides: {'Duplex' if is_duplex else 'Simplex'}, Copies: {copies})"
         except Exception as e:
@@ -339,14 +355,14 @@ def main():
         pulse_count += 1
         timestamp = time.strftime("%H:%M:%S")
 
-        success, data, temp, ram = send_heartbeat(args.server, args.machine, args.token)
+        success, data, temp, ram = send_heartbeat(args.server, args.machine, args.token, args.printer)
 
         if success:
             # Check for released print jobs from the kiosk
             jobs = data.get("jobs", [])
             if jobs:
                 # Detect target printer
-                detected = detect_connected_printers()
+                detected = detect_connected_printers(args.printer)
                 chosen_printer = "Default Laser Spooler"
                 is_physically_online = False
                 chosen_port = "USB"
@@ -354,10 +370,16 @@ def main():
                 if detected:
                     real_printers = [p for p in detected if not any(v in p["name"].lower() for v in ["onenote", "pdf", "xps", "fax"])]
                     online_printers = [p for p in real_printers if p.get("connected")]
-                    p_obj = online_printers[0] if online_printers else (real_printers[0] if real_printers else detected[0])
-                    chosen_printer = args.printer or p_obj["name"]
-                    is_physically_online = p_obj.get("connected", False)
-                    chosen_port = p_obj.get("port", "USB")
+                    if args.printer:
+                        chosen_printer = args.printer
+                        match = next((p for p in detected if p["name"].lower() == args.printer.lower()), None)
+                        is_physically_online = match.get("connected", True) if match else True
+                        chosen_port = match.get("port", "CUPS/Network") if match else "CUPS/Network"
+                    else:
+                        p_obj = online_printers[0] if online_printers else (real_printers[0] if real_printers else detected[0])
+                        chosen_printer = p_obj["name"]
+                        is_physically_online = p_obj.get("connected", False)
+                        chosen_port = p_obj.get("port", "USB")
 
                 for job in jobs:
                     order_num = job.get("orderNumber", "ORD-UNKNOWN")
