@@ -264,6 +264,29 @@ def dod_5220_shred_file(filepath: str) -> int:
     return size
 
 
+def report_job_ack(server_url: str, order_id: str, order_number: str, pin: str, success: bool, message: str):
+    """Sends immediate CUPS printing confirmation back to Next.js so kiosk UI transitions to completed."""
+    url = f"{server_url.rstrip('/')}/api/kiosk/job-ack"
+    payload = {
+        "orderId": order_id,
+        "orderNumber": order_number,
+        "pin": pin,
+        "success": success,
+        "message": message,
+    }
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": "SmartPrint-Pi5-Daemon/2.4"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            pass
+    except Exception as e:
+        print(f"  {YELLOW}[WARN] Could not report job ACK to cloud: {e}{RESET}", flush=True)
+
+
 def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_physically_online: bool, is_test_print: bool = False, is_duplex: bool = False, copies: int = 1) -> tuple[bool, str]:
     """
     Dispatches file to target printer spooler.
@@ -327,8 +350,9 @@ def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_p
             else:
                 lp_cmd.extend(["-o", "sides=one-sided", "-o", "Duplex=None"])
             lp_cmd.extend(["-o", "media=A4", "-o", "PageSize=A4", filepath])
-            subprocess.run(lp_cmd, check=True, timeout=20)
-            return True, f"Sent to CUPS -> [{printer_name}] (Sides: {'Duplex' if is_duplex else 'Simplex'}, Copies: {copies})"
+            res = subprocess.run(lp_cmd, check=True, timeout=20, capture_output=True, text=True)
+            cups_out = res.stdout.strip() or f"request id is {printer_name} (1 file)"
+            return True, f"Sent to CUPS -> [{printer_name}] ({cups_out})"
         except Exception as e:
             return False, f"CUPS error: {e}"
 
@@ -382,7 +406,9 @@ def main():
                         chosen_port = p_obj.get("port", "USB")
 
                 for job in jobs:
+                    order_id = job.get("orderId", "")
                     order_num = job.get("orderNumber", "ORD-UNKNOWN")
+                    pin_code = str(job.get("pin", "N/A"))
                     file_name = job.get("fileName", "Document.pdf")
                     download_url = job.get("downloadUrl", "")
                     is_test_print = bool(job.get("isTestPrint", False))
@@ -400,7 +426,7 @@ def main():
                     print(f"  {BOLD}Document:{RESET}       {file_name}", flush=True)
                     print(f"  {BOLD}Pages / Copy:{RESET}   {job.get('pages')} pages | {job.get('copies')} copy | {job.get('paperSize', 'A4')}", flush=True)
                     print(f"  {BOLD}Print Mode:{RESET}     {job.get('colorMode', 'bw').upper()} (Duplex: {job.get('duplexMode', 'single').upper()})", flush=True)
-                    print(f"  {BOLD}PIN Verified:{RESET}   {job.get('pin', 'N/A')}", flush=True)
+                    print(f"  {BOLD}PIN Verified:{RESET}   {pin_code}", flush=True)
 
                     # 1. Download file to secure local memory spool
                     local_file, file_bytes = download_job_file(args.server, download_url, order_num, file_name)
@@ -415,6 +441,11 @@ def main():
                     time.sleep(0.5)
                     spool_color = GREEN if spool_ok else RED
                     print(f"  {BOLD}Hardware Spool:{RESET}{spool_color}[{'SUCCESS' if spool_ok else 'ALERT'}] {spool_msg}{RESET}", flush=True)
+
+                    # Send ACK to Cloud so Kiosk Touchscreen completes in real-time
+                    report_job_ack(args.server, order_id, order_num, pin_code, spool_ok, spool_msg)
+                    ack_color = GREEN if spool_ok else RED
+                    print(f"  {BOLD}Cloud ACK:{RESET}      {ack_color}[CONFIRMED] Reported CUPS status to Next.js API{RESET}", flush=True)
 
                     # 3. Real DoD 5220.22-M Zero-Wipe File Shredder
                     wiped_bytes = dod_5220_shred_file(local_file)

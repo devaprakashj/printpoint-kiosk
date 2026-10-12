@@ -130,6 +130,9 @@ export async function POST(req: NextRequest) {
     };
 
     db.enqueueHardwareJob(targetMachine, jobPayload);
+    db.setHardwareJobStatus(jobPayload.orderId, 'spooling', 'Dispatched to CUPS print daemon');
+    if (jobPayload.orderNumber) db.setHardwareJobStatus(jobPayload.orderNumber, 'spooling', 'Dispatched to CUPS print daemon');
+    if (pin) db.setHardwareJobStatus(String(pin).trim(), 'spooling', 'Dispatched to CUPS print daemon');
 
     return NextResponse.json({
       success: true,

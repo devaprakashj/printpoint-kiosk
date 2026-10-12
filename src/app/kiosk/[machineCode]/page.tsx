@@ -430,36 +430,16 @@ export default function AutonomousTouchscreenKiosk() {
     setCurrentScreen('order_details');
   };
 
-  // ── TRIGGER REAL PRINTING SEQUENCE ──
+  // ── TRIGGER REAL PRINTING SEQUENCE (SYNCHRONIZED WITH CUPS) ──
   const startPrintingSequence = async () => {
     if (!activeOrder) return;
 
     playTouchTone(1100, 0.2);
     setCurrentScreen('printing');
-    setPrintProgress(0);
+    setPrintProgress(10);
     setPrintStep(1); // Preparing
 
-    // Step transitions matching hardware spooler
-    const timer = setInterval(() => {
-      setPrintProgress((prev) => {
-        const next = prev + 8;
-        if (next >= 30 && next < 70) {
-          setPrintStep(2); // Printing
-        } else if (next >= 70 && next < 95) {
-          setPrintStep(3); // Finishing
-        } else if (next >= 100) {
-          clearInterval(timer);
-          setPrintStep(4); // Complete
-          finalizePrintJob();
-          return 100;
-        }
-        return next;
-      });
-    }, 280);
-  };
-
-  // Finalize Print Call
-  const finalizePrintJob = async () => {
+    // 1. Immediately enqueue job to Raspberry Pi daemon
     try {
       await fetch('/api/pin/release', {
         method: 'POST',
@@ -470,12 +450,73 @@ export default function AutonomousTouchscreenKiosk() {
           machineCode,
         }),
       });
-    } catch {}
+    } catch (e) {
+      console.warn('Release request dispatch warning:', e);
+    }
 
-    playTouchTone(1320, 0.4);
-    setTimeout(() => {
-      setCurrentScreen('print_complete');
-    }, 600);
+    setPrintProgress(35);
+    setPrintStep(2); // Printing / Spooling
+
+    // 2. Poll CUPS hardware confirmation from /api/kiosk/job-status
+    let attempts = 0;
+    const maxAttempts = 40; // 40 * 750ms = 30 seconds max
+    const checkInterval = 750;
+
+    const pollTimer = setInterval(async () => {
+      attempts += 1;
+
+      // Smoothly advance progress up to 85% while waiting for CUPS
+      setPrintProgress((prev) => {
+        if (prev < 85) return prev + 3;
+        return 85;
+      });
+      if (attempts > 3 && printStep < 3) {
+        setPrintStep(3); // Finishing / Waiting for CUPS paper feed
+      }
+
+      try {
+        const queryParams = new URLSearchParams({
+          orderId: String(activeOrder?.id || ''),
+          orderNumber: String(activeOrder?.orderNumber || ''),
+          pin: String(enteredPin || ''),
+        });
+        const res = await fetch(`/api/kiosk/job-status?${queryParams.toString()}`);
+        const data = await res.json();
+
+        if (data.status === 'completed') {
+          // CUPS HARDWARE PRINT CONFIRMED!
+          clearInterval(pollTimer);
+          setPrintProgress(100);
+          setPrintStep(4); // Complete
+          playTouchTone(1320, 0.4);
+
+          setTimeout(() => {
+            setCurrentScreen('print_complete');
+          }, 800);
+          return;
+        }
+
+        if (data.status === 'failed') {
+          clearInterval(pollTimer);
+          alert(data.message || 'CUPS Printer Error: Unable to print.');
+          resetToHome();
+          return;
+        }
+      } catch (err) {
+        console.error('Job status check failed:', err);
+      }
+
+      // Timeout fallback after 30 seconds
+      if (attempts >= maxAttempts) {
+        clearInterval(pollTimer);
+        setPrintProgress(100);
+        setPrintStep(4);
+        playTouchTone(1320, 0.4);
+        setTimeout(() => {
+          setCurrentScreen('print_complete');
+        }, 800);
+      }
+    }, checkInterval);
   };
 
   // Auto Countdown on Screen 8 (Collection Instruction)

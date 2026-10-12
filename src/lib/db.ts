@@ -74,6 +74,7 @@ class PrintAtmStore {
   private orders: PrintOrder[] = [];
   private telemetryLogs: SensorTelemetry[] = [];
   private pendingHardwareJobs: Record<string, any[]> = {};
+  private hardwareJobStatus: Record<string, { status: string; message: string; updatedAt: string }> = {};
 
   constructor() {
     // 100% Production Clean: No mock orders or demo transactions
@@ -261,6 +262,21 @@ class PrintAtmStore {
     const jobs = this.pendingHardwareJobs[code] || [];
     this.pendingHardwareJobs[code] = [];
     return jobs;
+  }
+
+  setHardwareJobStatus(key: string, status: string, message: string = ''): void {
+    if (!key) return;
+    const cleanKey = String(key).trim();
+    this.hardwareJobStatus[cleanKey] = {
+      status,
+      message,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  getHardwareJobStatus(key: string): { status: string; message: string; updatedAt: string } | undefined {
+    if (!key) return undefined;
+    return this.hardwareJobStatus[String(key).trim()];
   }
 }
 
