@@ -20,6 +20,7 @@ import argparse
 import subprocess
 import urllib.request
 import urllib.error
+import re
 
 # Force line-buffering and UTF-8 with errors='replace' so emoji never crashes Windows cp1252 consoles
 if hasattr(sys.stdout, "reconfigure"):
@@ -344,7 +345,9 @@ def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_p
     elif platform.system() == "Linux":
         # Linux (Raspberry Pi 5 with CUPS)
         try:
-            lp_cmd = ["lp", "-d", printer_name, "-n", str(max(1, int(copies)))]
+            # -c: CRITICAL - forces CUPS to copy the file to its internal spool immediately
+            # so that subsequent DoD shredding of local_file does not destroy the file while CUPS filters it!
+            lp_cmd = ["lp", "-c", "-d", printer_name, "-n", str(max(1, int(copies)))]
             if is_duplex:
                 lp_cmd.extend(["-o", "sides=two-sided-long-edge", "-o", "Duplex=DuplexNoTumble"])
             else:
@@ -352,6 +355,21 @@ def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_p
             lp_cmd.extend(["-o", "media=A4", "-o", "PageSize=A4", filepath])
             res = subprocess.run(lp_cmd, check=True, timeout=20, capture_output=True, text=True)
             cups_out = res.stdout.strip() or f"request id is {printer_name} (1 file)"
+
+            # Track job in CUPS queue to ensure it did not error or get stopped
+            match = re.search(r'request id is ([^\s]+)', cups_out)
+            if match:
+                job_id = match.group(1)
+                # Wait up to 10 seconds for job to be accepted and dispatched to hardware socket
+                for _ in range(20):
+                    time.sleep(0.5)
+                    stat = subprocess.run(['lpstat', '-l', '-W', 'not-completed', '-o', printer_name], capture_output=True, text=True).stdout
+                    if job_id not in stat:
+                        # Job departed queue successfully to printer hardware!
+                        break
+                    if "the print file could not be opened" in stat.lower() or "stopped" in stat.lower():
+                        return False, f"CUPS job stopped with error: {stat.strip()}"
+
             return True, f"Sent to CUPS -> [{printer_name}] ({cups_out})"
         except Exception as e:
             return False, f"CUPS error: {e}"
