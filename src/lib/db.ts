@@ -282,7 +282,7 @@ class PrintAtmStore {
 
 // Global Singleton Instance
 const globalObj = global as unknown as { __printAtmStore?: PrintAtmStore };
-if (!globalObj.__printAtmStore || typeof (globalObj.__printAtmStore as any).popHardwareJobs !== 'function') {
+if (!globalObj.__printAtmStore || typeof (globalObj.__printAtmStore as any).getHardwareJobStatus !== 'function') {
   globalObj.__printAtmStore = new PrintAtmStore();
 }
 export const db: PrintAtmStore = globalObj.__printAtmStore;
