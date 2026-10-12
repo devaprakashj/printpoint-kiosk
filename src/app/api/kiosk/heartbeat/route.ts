@@ -133,7 +133,6 @@ export async function POST(req: NextRequest) {
     });
 
     // Fetch any queued hardware print jobs for this machine ONLY if request is from the hardware daemon
-    const isHardwareDaemon = Boolean(daemonSecretToken || osPlatform !== 'kiosk-terminal-display');
     const pendingJobs = isHardwareDaemon ? db.popHardwareJobs(cleanCode) : [];
 
     return NextResponse.json({
