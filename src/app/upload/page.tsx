@@ -1529,6 +1529,9 @@ export default function QwikprintAuthenticApp() {
           customerPhone: cleanedPhone,
           customerName: validName,
           documents: documentsPayload,
+          copies: filesList[0]?.copies || 1,
+          colorMode: filesList[0]?.colorMode || 'bw',
+          duplexMode: filesList[0]?.duplexMode || 'simplex',
         }),
       });
       const data = await res.json();

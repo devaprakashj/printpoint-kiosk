@@ -239,6 +239,18 @@ def convert_image_to_pdf(image_path: str) -> str:
     return image_path
 
 
+def get_pdf_page_count(filepath: str) -> int:
+    """Returns the total number of pages in a PDF document using pdfinfo or basic parsing."""
+    try:
+        res = subprocess.run(["pdfinfo", filepath], capture_output=True, text=True, timeout=5)
+        for line in res.stdout.splitlines():
+            if line.strip().startswith("Pages:"):
+                return int(line.split(":")[1].strip())
+    except Exception:
+        pass
+    return 1
+
+
 def download_job_file(server_url: str, download_url: str, order_number: str, file_name: str) -> tuple[str, int]:
     """
     Downloads the print file to a secure local spool cache.
@@ -416,14 +428,33 @@ def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_p
     elif platform.system() == "Linux":
         # Linux (Raspberry Pi 5 with CUPS)
         try:
+            print_file = filepath
+            actual_copies = max(1, int(copies))
+
+            # Smart Duplex Imposition for 1-page documents with multiple copies:
+            # CUPS duplex only applies across multiple pages within a single document stream.
+            # If user has a 1-page file and selected 2 copies + Duplex, merge the page into a 2-page PDF
+            # so Kyocera feeds and prints front & back on 1 single physical sheet!
+            if is_duplex and actual_copies >= 2 and print_file.lower().endswith(".pdf"):
+                page_cnt = get_pdf_page_count(print_file)
+                if page_cnt == 1:
+                    duplex_pairs = actual_copies // 2
+                    merged_duplex_file = print_file.replace(".pdf", "_duplex_merged.pdf")
+                    unite_cmd = ["pdfunite", print_file, print_file, merged_duplex_file]
+                    merge_res = subprocess.run(unite_cmd, capture_output=True, text=True)
+                    if merge_res.returncode == 0 and os.path.exists(merged_duplex_file):
+                        print(f"  {CYAN}[DUPLEX MERGE]{RESET} Merged 1-page document into 2-page duplex sheet for front & back printing!", flush=True)
+                        print_file = merged_duplex_file
+                        actual_copies = max(1, duplex_pairs)
+
             # -c: CRITICAL - forces CUPS to copy the file to its internal spool immediately
             # so that subsequent DoD shredding of local_file does not destroy the file while CUPS filters it!
-            lp_cmd = ["lp", "-c", "-d", printer_name, "-n", str(max(1, int(copies)))]
+            lp_cmd = ["lp", "-c", "-d", printer_name, "-n", str(actual_copies)]
             if is_duplex:
                 lp_cmd.extend(["-o", "sides=two-sided-long-edge", "-o", "Duplex=DuplexNoTumble"])
             else:
                 lp_cmd.extend(["-o", "sides=one-sided", "-o", "Duplex=None"])
-            lp_cmd.extend(["-o", "media=A4", "-o", "PageSize=A4", "-o", "InputSlot=Auto", "-o", "MediaType=Auto", "-o", "fit-to-page", filepath])
+            lp_cmd.extend(["-o", "media=A4", "-o", "PageSize=A4", "-o", "InputSlot=Auto", "-o", "MediaType=Auto", "-o", "fit-to-page", print_file])
             res = subprocess.run(lp_cmd, check=True, timeout=20, capture_output=True, text=True)
             cups_out = res.stdout.strip() or f"request id is {printer_name} (1 file)"
 
@@ -552,8 +583,9 @@ def main():
                     # 2. Spool to Target Printer with real hardware presence indicator
                     cable_status = f"{GREEN}[PHYSICALLY CONNECTED - {chosen_port}]{RESET}" if is_physically_online else f"{RED}[USB CABLE UNPLUGGED - Offline]{RESET}"
                     print(f"  {BOLD}Printer Target:{RESET}{YELLOW}{chosen_printer}{RESET} {cable_status}", flush=True)
-                    is_duplex = bool(job.get("duplexMode", "").lower() in ["duplex", "double", "two-sided"])
-                    copies_count = int(job.get("copies", 1))
+                    raw_duplex = str(job.get("duplexMode") or job.get("duplex_mode") or "").strip().lower()
+                    is_duplex = bool(raw_duplex in ["duplex", "double", "two-sided", "both", "duplexnotumble"])
+                    copies_count = max(1, int(job.get("copies") or 1))
                     spool_ok, spool_msg = dispatch_to_printer(local_file, chosen_printer, args.print_real, is_physically_online, is_test_print=is_test_print, is_duplex=is_duplex, copies=copies_count)
                     time.sleep(0.5)
                     spool_color = GREEN if spool_ok else RED

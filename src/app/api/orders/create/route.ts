@@ -195,6 +195,12 @@ export async function POST(req: NextRequest) {
 
     let newOrder: any = null;
 
+    // Resolve primary print parameters from documents payload (or top-level fallbacks)
+    const firstDoc = Array.isArray(documents) && documents.length > 0 ? documents[0] : null;
+    const resolvedCopies = firstDoc?.copies ? Math.max(1, Number(firstDoc.copies)) : Math.max(1, Number(copies) || 1);
+    const resolvedColorMode: ColorMode = (firstDoc?.colorMode || colorMode) === 'color' ? 'color' : 'bw';
+    const resolvedDuplexMode: DuplexMode = (firstDoc?.duplexMode || duplexMode) === 'duplex' ? 'duplex' : 'simplex';
+
     if (isSupabaseConfigured && supabaseAdmin) {
       const insertPayload: any = {
         order_number: orderNumber,
@@ -207,9 +213,9 @@ export async function POST(req: NextRequest) {
         selected_page_ranges: String(pageRangeStr || 'all'),
         calculated_print_pages: grandTotalPrintPages,
         calculated_sheets: grandTotalSheets,
-        copies: Math.max(1, Number(copies) || 1),
-        color_mode: (colorMode === 'color' ? 'color' : 'bw'),
-        duplex_mode: (duplexMode === 'duplex' ? 'duplex' : 'simplex'),
+        copies: resolvedCopies,
+        color_mode: resolvedColorMode,
+        duplex_mode: resolvedDuplexMode,
         paper_size: 'A4',
         price_per_sheet_paise: grandTotalSheets > 0 ? Math.round(finalAmountPaise / grandTotalSheets) : 200,
         subtotal_paise: finalAmountPaise,
@@ -289,9 +295,9 @@ export async function POST(req: NextRequest) {
         selectedPageRanges: String(pageRangeStr || 'all'),
         calculatedPrintPages: grandTotalPrintPages,
         calculatedSheets: grandTotalSheets,
-        copies: Math.max(1, Number(copies) || 1),
-        colorMode: (colorMode === 'color' ? 'color' : 'bw') as ColorMode,
-        duplexMode: (duplexMode === 'duplex' ? 'duplex' : 'simplex') as DuplexMode,
+        copies: resolvedCopies,
+        colorMode: resolvedColorMode,
+        duplexMode: resolvedDuplexMode,
         paperSize: 'A4',
         pricePerSheetPaise: grandTotalSheets > 0 ? Math.round(finalAmountPaise / grandTotalSheets) : 200,
         subtotalPaise: finalAmountPaise,
