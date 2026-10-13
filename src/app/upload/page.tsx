@@ -1534,26 +1534,31 @@ export default function QwikprintAuthenticApp() {
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
 
-      // Securely upload physical document files to Supabase Storage Bucket ('printpoint-documents') in parallel
+      // Securely upload physical document files to Supabase Storage Bucket ('printpoint-documents').
+      // IMPORTANT: Upload sequentially (NOT parallel) — each upload overwrites file_storage_url on the order.
+      // Parallel uploads cause a race condition where the last-to-finish file wins, potentially storing
+      // the wrong file path. Sequential upload ensures the primary (first) file is always stored correctly.
       if (filesList.length > 0) {
-        await Promise.all(
-          filesList.map(async (f) => {
-            if (f.file) {
-              try {
-                const formData = new FormData();
-                formData.append('file', f.file);
-                formData.append('orderId', data.order.id);
-                formData.append('fileName', f.name);
-                await fetch('/api/documents/upload', {
-                  method: 'POST',
-                  body: formData,
-                });
-              } catch (e) {
-                console.warn('Document storage upload notice:', e);
-              }
+        for (const f of filesList) {
+          if (f.file) {
+            try {
+              const formData = new FormData();
+              formData.append('file', f.file);
+              formData.append('orderId', data.order.id);
+              formData.append('fileName', f.name);
+              await fetch('/api/documents/upload', {
+                method: 'POST',
+                body: formData,
+              });
+              // Break after first file: only the primary document is used for printing.
+              // If multi-document support is needed later, the upload API must be changed
+              // to append to a files[] array in DB instead of overwriting file_storage_url.
+              break;
+            } catch (e) {
+              console.warn('Document storage upload notice:', e);
             }
-          })
-        );
+          }
+        }
       }
 
       // Clear print session storage so next visit is clean

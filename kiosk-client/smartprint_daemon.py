@@ -185,10 +185,66 @@ def send_heartbeat(server_url: str, machine_code: str, daemon_token: str, prefer
         return False, str(e), cpu_temp, ram_usage
 
 
+def convert_image_to_pdf(image_path: str) -> str:
+    """
+    Converts a PNG/JPG/JPEG image file to a PDF so CUPS driverless filters
+    handle it reliably. Returns the new PDF path, or the original path if
+    conversion is not possible.
+    Uses img2pdf (preferred) or ImageMagick convert as fallback.
+    """
+    ext = os.path.splitext(image_path)[1].lower()
+    if ext not in [".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff", ".tif", ".webp"]:
+        return image_path  # Already a PDF or unsupported, return as-is
+
+    pdf_path = os.path.splitext(image_path)[0] + "_converted.pdf"
+
+    # Method 1: img2pdf (best quality, no resampling)
+    try:
+        result = subprocess.run(
+            ["python3", "-m", "img2pdf", image_path, "-o", pdf_path],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0 and os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 100:
+            print(f"  {GREEN}[IMG2PDF] Converted image to PDF: {os.path.basename(pdf_path)}{RESET}", flush=True)
+            return pdf_path
+    except Exception:
+        pass
+
+    # Method 2: ImageMagick convert (fallback)
+    try:
+        result = subprocess.run(
+            ["convert", "-density", "300", "-quality", "95", image_path, pdf_path],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0 and os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 100:
+            print(f"  {GREEN}[ImageMagick] Converted image to PDF: {os.path.basename(pdf_path)}{RESET}", flush=True)
+            return pdf_path
+    except Exception:
+        pass
+
+    # Method 3: Use Python Pillow + reportlab if available
+    try:
+        from PIL import Image as PILImage
+        img = PILImage.open(image_path)
+        if img.mode in ['RGBA', 'LA', 'P']:
+            img = img.convert('RGB')
+        img.save(pdf_path, 'PDF', resolution=300)
+        if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 100:
+            print(f"  {GREEN}[Pillow] Converted image to PDF: {os.path.basename(pdf_path)}{RESET}", flush=True)
+            return pdf_path
+    except Exception:
+        pass
+
+    print(f"  {YELLOW}[WARN] Could not convert image to PDF; sending original image to CUPS{RESET}", flush=True)
+    return image_path
+
+
 def download_job_file(server_url: str, download_url: str, order_number: str, file_name: str) -> tuple[str, int]:
     """
     Downloads the print file to a secure local spool cache.
-    If no cloud URL is available, creates a verified cryptographic spool slip.
+    IMPORTANT: If a download_url is provided but fails, raises RuntimeError immediately
+    so the job fails loudly and does NOT silently fall back to a placeholder sheet.
+    Only creates a placeholder slip if NO download_url was ever provided (test/dummy jobs).
     """
     cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "spool_cache")
     os.makedirs(cache_dir, exist_ok=True)
@@ -198,17 +254,32 @@ def download_job_file(server_url: str, download_url: str, order_number: str, fil
 
     if download_url:
         full_url = download_url if download_url.startswith("http") else f"{server_url.rstrip('/')}{download_url}"
+        print(f"  {CYAN}[DOWNLOAD] Fetching from URL: {full_url[:100]}...{RESET}", flush=True)
         try:
             req = urllib.request.Request(full_url, headers={"User-Agent": "SmartPrint-Hardware-Spooler/2.4"})
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                http_status = resp.getcode()
+                content_type = resp.headers.get('Content-Type', 'application/octet-stream')
                 data = resp.read()
+                if len(data) < 10:
+                    raise RuntimeError(f"Download returned suspiciously small file ({len(data)} bytes). Aborting to avoid printing garbage.")
                 with open(local_path, "wb") as f:
                     f.write(data)
-                return local_path, len(data)
+                print(f"  {GREEN}[DOWNLOAD OK] {len(data):,} bytes | HTTP {http_status} | Content-Type: {content_type}{RESET}", flush=True)
+                # Auto-convert image formats to PDF for reliable CUPS handling
+                final_path = convert_image_to_pdf(local_path)
+                return final_path, len(data)
+        except urllib.error.HTTPError as http_err:
+            raise RuntimeError(f"Download HTTP error {http_err.code} for order {order_number}: {http_err.reason}. Check if the signed URL is still valid.")
+        except urllib.error.URLError as url_err:
+            raise RuntimeError(f"Download network error for order {order_number}: {url_err.reason}")
+        except RuntimeError:
+            raise
         except Exception as dl_err:
-            print(f"  {RED}[WARN] File download failed from {full_url[:60]}...: {dl_err}{RESET}", flush=True)
+            raise RuntimeError(f"Download failed for order {order_number} from {full_url[:80]}: {dl_err}")
 
-    # If test slip or simulated document
+    # Only fallback to placeholder if NO download_url was provided at all (test/alignment jobs)
+    print(f"  {YELLOW}[INFO] No download URL provided — generating test alignment slip for {order_number}{RESET}", flush=True)
     sample_content = (
         f"================================================================\r\n"
         f"   RAJALAKSHMI INSTITUTE OF TECHNOLOGY - AUTONOMOUS PRINT ATM  \r\n"
@@ -447,8 +518,14 @@ def main():
                     print(f"  {BOLD}PIN Verified:{RESET}   {pin_code}", flush=True)
 
                     # 1. Download file to secure local memory spool
-                    local_file, file_bytes = download_job_file(args.server, download_url, order_num, file_name)
-                    print(f"  {BOLD}File Download:{RESET}  {GREEN}[OK] Downloaded {file_bytes:,} bytes to local spool{RESET}", flush=True)
+                    try:
+                        local_file, file_bytes = download_job_file(args.server, download_url, order_num, file_name)
+                        print(f"  {BOLD}File Download:{RESET}  {GREEN}[OK] {file_bytes:,} bytes → {os.path.basename(local_file)}{RESET}", flush=True)
+                    except RuntimeError as dl_fatal:
+                        print(f"  {RED}[FATAL] Download failed: {dl_fatal}{RESET}", flush=True)
+                        report_job_ack(args.server, order_id, order_num, pin_code, False, f"Download failed: {dl_fatal}")
+                        print(f"{RED}{BOLD}================================================================{RESET}\n", flush=True)
+                        continue
 
                     # 2. Spool to Target Printer with real hardware presence indicator
                     cable_status = f"{GREEN}[PHYSICALLY CONNECTED - {chosen_port}]{RESET}" if is_physically_online else f"{RED}[USB CABLE UNPLUGGED - Offline]{RESET}"
