@@ -11,25 +11,35 @@ export async function GET(req: NextRequest) {
     const orderNumber = searchParams.get('orderNumber') || '';
     const pin = searchParams.get('pin') || '';
 
-    // 1. Check in-memory fast cache first
+    // 1. If in-memory already confirms hardware completion, return immediately
     let jobStatus = orderId ? db.getHardwareJobStatus(orderId) : undefined;
     if (!jobStatus && orderNumber) jobStatus = db.getHardwareJobStatus(orderNumber);
     if (!jobStatus && pin) jobStatus = db.getHardwareJobStatus(pin);
 
-    if (jobStatus) {
+    if (jobStatus?.status === 'completed') {
       return NextResponse.json({
         success: true,
-        status: jobStatus.status,
-        message: jobStatus.message,
+        status: 'completed',
+        message: jobStatus.message || 'Confirmed by CUPS',
+        updatedAt: jobStatus.updatedAt,
+      });
+    }
+    if (jobStatus?.status === 'failed') {
+      return NextResponse.json({
+        success: true,
+        status: 'failed',
+        message: jobStatus.message || 'CUPS print failed',
         updatedAt: jobStatus.updatedAt,
       });
     }
 
-    // 2. Check Supabase orders table
+    // 2. Query Supabase (distributed source of truth across Vercel cloud and local dev)
     if (isSupabaseConfigured && supabaseAdmin && (orderId || orderNumber || pin)) {
       try {
-        let query = supabaseAdmin.from('orders').select('order_status, completed_at');
-        if (orderId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId)) {
+        let query = supabaseAdmin.from('orders').select('id, order_number, four_digit_pin, order_status, completed_at');
+        const isUuid = Boolean(orderId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId));
+
+        if (isUuid) {
           query = query.eq('id', orderId);
         } else if (orderNumber) {
           query = query.eq('order_number', orderNumber);
@@ -39,17 +49,42 @@ export async function GET(req: NextRequest) {
 
         const { data: oData } = await query.order('created_at', { ascending: false }).limit(1).maybeSingle();
         if (oData) {
-          const isCompleted = oData.order_status === 'completed';
-          return NextResponse.json({
-            success: true,
-            status: isCompleted ? 'completed' : (oData.order_status === 'failed' ? 'failed' : 'spooling'),
-            message: isCompleted ? 'Confirmed by CUPS' : 'Printing in progress',
-            updatedAt: oData.completed_at || new Date().toISOString(),
-          });
+          if (oData.order_status === 'completed') {
+            // Synchronize in-memory cache so subsequent checks are instant
+            if (oData.id) db.setHardwareJobStatus(oData.id, 'completed', 'Hardware paper feed confirmed by CUPS');
+            if (oData.order_number) db.setHardwareJobStatus(oData.order_number, 'completed', 'Hardware paper feed confirmed by CUPS');
+            if (oData.four_digit_pin) db.setHardwareJobStatus(oData.four_digit_pin, 'completed', 'Hardware paper feed confirmed by CUPS');
+
+            return NextResponse.json({
+              success: true,
+              status: 'completed',
+              message: 'Hardware paper feed confirmed by CUPS',
+              updatedAt: oData.completed_at || new Date().toISOString(),
+            });
+          }
+
+          if (oData.order_status === 'failed') {
+            return NextResponse.json({
+              success: true,
+              status: 'failed',
+              message: 'Hardware print failed',
+              updatedAt: oData.completed_at || new Date().toISOString(),
+            });
+          }
         }
       } catch (err) {
         console.error('[JOB-STATUS] Supabase query warning:', err);
       }
+    }
+
+    // 3. Fallback: If in-memory has active spooling status, return it
+    if (jobStatus) {
+      return NextResponse.json({
+        success: true,
+        status: jobStatus.status,
+        message: jobStatus.message,
+        updatedAt: jobStatus.updatedAt,
+      });
     }
 
     return NextResponse.json({

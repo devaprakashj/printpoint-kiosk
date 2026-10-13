@@ -459,7 +459,7 @@ export default function AutonomousTouchscreenKiosk() {
 
     // 2. Poll CUPS hardware confirmation from /api/kiosk/job-status
     let attempts = 0;
-    const maxAttempts = 40; // 40 * 750ms = 30 seconds max
+    const maxAttempts = 60; // 60 * 750ms = 45 seconds max (covers Kyocera MFP socket spool + fuser warmup)
     const checkInterval = 750;
 
     const pollTimer = setInterval(async () => {
@@ -506,10 +506,10 @@ export default function AutonomousTouchscreenKiosk() {
         console.error('Job status check failed:', err);
       }
 
-      // Timeout if printer does not acknowledge within 35 seconds
+      // Timeout if printer does not acknowledge within 45 seconds
       if (attempts >= maxAttempts) {
         clearInterval(pollTimer);
-        alert('Hardware Timeout: The printer did not acknowledge paper feed within 30 seconds. Please check the printer paper tray or connection.');
+        alert('Hardware Timeout: The printer did not acknowledge paper feed within 45 seconds. Please check the printer paper tray or connection.');
         resetToHome();
         return;
       }
