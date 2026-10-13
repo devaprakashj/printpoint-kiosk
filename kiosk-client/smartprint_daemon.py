@@ -258,8 +258,12 @@ def download_job_file(server_url: str, download_url: str, order_number: str, fil
     so the job fails loudly and does NOT silently fall back to a placeholder sheet.
     Only creates a placeholder slip if NO download_url was ever provided (test/dummy jobs).
     """
-    cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "spool_cache")
+    cache_dir = "/tmp/smartprint_spool" if platform.system() == "Linux" else os.path.join(os.path.dirname(os.path.abspath(__file__)), "spool_cache")
     os.makedirs(cache_dir, exist_ok=True)
+    try:
+        os.chmod(cache_dir, 0o777)
+    except Exception:
+        pass
 
     clean_name = "".join(c for c in file_name if c.isalnum() or c in "._- ") or "document.pdf"
     local_path = os.path.join(cache_dir, f"{order_number}_{clean_name}")
@@ -277,9 +281,17 @@ def download_job_file(server_url: str, download_url: str, order_number: str, fil
                     raise RuntimeError(f"Download returned suspiciously small file ({len(data)} bytes). Aborting to avoid printing garbage.")
                 with open(local_path, "wb") as f:
                     f.write(data)
+                try:
+                    os.chmod(local_path, 0o666)
+                except Exception:
+                    pass
                 print(f"  {GREEN}[DOWNLOAD OK] {len(data):,} bytes | HTTP {http_status} | Content-Type: {content_type}{RESET}", flush=True)
                 # Auto-convert image formats to PDF for reliable CUPS handling
                 final_path = convert_image_to_pdf(local_path)
+                try:
+                    os.chmod(final_path, 0o666)
+                except Exception:
+                    pass
                 return final_path, len(data)
         except urllib.error.HTTPError as http_err:
             raise RuntimeError(f"Download HTTP error {http_err.code} for order {order_number}: {http_err.reason}. Check if the signed URL is still valid.")
@@ -476,12 +488,13 @@ def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_p
                         print(f"  {GREEN}[CUPS HARDWARE CONFIRMED]{RESET} Job {job_id} reached completed state in {sec+1}s", flush=True)
                         break
 
-                    # 2. Check active/not-completed status for errors or stoppages
-                    not_completed = subprocess.run(['lpstat', '-l', '-W', 'not-completed', '-o', printer_name], capture_output=True, text=True).stdout
-                    if job_id in not_completed:
-                        lower_nc = not_completed.lower()
-                        if "stopped" in lower_nc or "the print file could not be opened" in lower_nc:
-                            return False, f"CUPS job stopped with error: {not_completed.strip()}"
+                    # 2. Check active status specifically for THIS job_id
+                    job_stat = subprocess.run(['lpstat', '-l', job_id], capture_output=True, text=True).stdout
+                    if job_stat:
+                        lower_js = job_stat.lower()
+                        if "stopped" in lower_js or "the print file could not be opened" in lower_js:
+                            subprocess.run(['cancel', job_id], capture_output=True)
+                            return False, f"CUPS job {job_id} stopped with error: {job_stat.strip()}"
                     else:
                         # Job is no longer in 'not-completed' queue, re-check completed once more
                         time.sleep(0.5)
