@@ -200,13 +200,13 @@ def download_job_file(server_url: str, download_url: str, order_number: str, fil
         full_url = download_url if download_url.startswith("http") else f"{server_url.rstrip('/')}{download_url}"
         try:
             req = urllib.request.Request(full_url, headers={"User-Agent": "SmartPrint-Hardware-Spooler/2.4"})
-            with urllib.request.urlopen(req, timeout=12) as resp:
+            with urllib.request.urlopen(req, timeout=15) as resp:
                 data = resp.read()
                 with open(local_path, "wb") as f:
                     f.write(data)
                 return local_path, len(data)
-        except Exception:
-            pass
+        except Exception as dl_err:
+            print(f"  {RED}[WARN] File download failed from {full_url[:60]}...: {dl_err}{RESET}", flush=True)
 
     # If test slip or simulated document
     sample_content = (
@@ -352,7 +352,7 @@ def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_p
                 lp_cmd.extend(["-o", "sides=two-sided-long-edge", "-o", "Duplex=DuplexNoTumble"])
             else:
                 lp_cmd.extend(["-o", "sides=one-sided", "-o", "Duplex=None"])
-            lp_cmd.extend(["-o", "media=A4", "-o", "PageSize=A4", "-o", "InputSlot=Auto", "-o", "MediaType=Auto", filepath])
+            lp_cmd.extend(["-o", "media=A4", "-o", "PageSize=A4", "-o", "InputSlot=Auto", "-o", "MediaType=Auto", "-o", "fit-to-page", filepath])
             res = subprocess.run(lp_cmd, check=True, timeout=20, capture_output=True, text=True)
             cups_out = res.stdout.strip() or f"request id is {printer_name} (1 file)"
 

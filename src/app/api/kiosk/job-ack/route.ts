@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
+import { shredDocument } from '@/lib/storage';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,19 +19,34 @@ export async function POST(req: NextRequest) {
 
     if (isSupabaseConfigured && supabaseAdmin) {
       try {
+        let q = supabaseAdmin.from('orders').select('id, file_storage_url');
+        if (orderId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(orderId))) {
+          q = q.eq('id', orderId);
+        } else if (orderNumber) {
+          q = q.eq('order_number', orderNumber);
+        } else if (pin) {
+          q = q.eq('four_digit_pin', String(pin).trim());
+        }
+
+        const { data: matchedOrder } = await q.maybeSingle();
+
         const updatePayload: Record<string, any> = {
           order_status: status,
         };
         if (success) {
-          updatePayload.completed_at = new Date().toISOString();
+          const completedAt = new Date().toISOString();
+          updatePayload.completed_at = completedAt;
+          updatePayload.file_shredded = true;
+          updatePayload.shredded_at = completedAt;
+          updatePayload.file_storage_url = null;
+
+          if (matchedOrder?.file_storage_url) {
+            Promise.resolve().then(() => shredDocument(matchedOrder.file_storage_url)).catch(() => {});
+          }
         }
 
-        if (orderId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(orderId))) {
-          await supabaseAdmin.from('orders').update(updatePayload).eq('id', orderId);
-        } else if (orderNumber) {
-          await supabaseAdmin.from('orders').update(updatePayload).eq('order_number', orderNumber);
-        } else if (pin) {
-          await supabaseAdmin.from('orders').update(updatePayload).eq('four_digit_pin', String(pin).trim());
+        if (matchedOrder?.id) {
+          await supabaseAdmin.from('orders').update(updatePayload).eq('id', matchedOrder.id);
         }
       } catch (err) {
         console.error('[JOB-ACK] Supabase update warning:', err);

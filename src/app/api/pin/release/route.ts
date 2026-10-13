@@ -31,22 +31,13 @@ export async function POST(req: NextRequest) {
         order = oData;
         targetMachineCode = machineCode || oData.machine_code;
 
-        // Non-blocking shred document from storage vault (Zero-Retention)
-        if (oData.file_storage_url) {
-          Promise.resolve().then(() => shredDocument(oData.file_storage_url)).catch(() => {});
-        }
-
-        // Set PIN as used, completed, shred verified, and nullify storage path in DB
+        // Set PIN as active/printing and used (Do not shred storage file yet; file is shredded upon hardware job-ack confirmation)
         await supabaseAdmin
           .from('orders')
           .update({
-            order_status: 'completed',
+            order_status: 'printing',
             payment_status: 'paid',
             pin_used_at: completedAt,
-            completed_at: completedAt,
-            file_shredded: true,
-            shredded_at: completedAt,
-            file_storage_url: null,
           })
           .eq('id', oData.id);
 
