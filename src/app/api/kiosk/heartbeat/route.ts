@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
 import { db } from '@/lib/db';
+import { getDocumentDownloadUrl } from '@/lib/storage';
 
 export const dynamic = 'force-dynamic';
 
@@ -151,6 +152,46 @@ export async function POST(req: NextRequest) {
 
     // Fetch any queued hardware print jobs for this machine ONLY if request is from the hardware daemon
     const pendingJobs = isHardwareDaemon ? db.popHardwareJobs(cleanCode) : [];
+
+    // Also check Supabase for any orders marked as 'printing' for this machine (bridges localhost:3000 and Vercel)
+    if (isHardwareDaemon && isSupabaseConfigured && supabaseAdmin) {
+      try {
+        const { data: supaPending } = await supabaseAdmin
+          .from('orders')
+          .select('*')
+          .eq('machine_code', cleanCode)
+          .eq('order_status', 'printing')
+          .order('created_at', { ascending: true })
+          .limit(5);
+
+        if (supaPending && supaPending.length > 0) {
+          for (const ord of supaPending) {
+            if (pendingJobs.some((j: any) => j.orderId === ord.id)) continue;
+            let downloadUrl = '';
+            if (ord.file_storage_url) {
+              downloadUrl = await getDocumentDownloadUrl(ord.file_storage_url, 300);
+            }
+            pendingJobs.push({
+              orderId: ord.id,
+              orderNumber: ord.order_number,
+              fileName: ord.file_name || 'Document.pdf',
+              fileStorageUrl: ord.file_storage_url,
+              downloadUrl: downloadUrl,
+              pages: ord.calculated_print_pages || 1,
+              sheets: ord.calculated_sheets || 1,
+              copies: ord.copies || 1,
+              colorMode: ord.color_mode || 'bw',
+              duplexMode: ord.duplex_mode || 'single',
+              paperSize: ord.paper_size || 'A4',
+              pin: ord.four_digit_pin || 'N/A',
+              releasedAt: ord.pin_used_at || new Date().toISOString(),
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('[HEARTBEAT] Supabase pending jobs error:', err);
+      }
+    }
 
     return NextResponse.json({
       success: true,
