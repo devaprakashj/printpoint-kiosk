@@ -67,6 +67,8 @@ export async function POST(req: NextRequest) {
           );
         }
 
+        const totalPaise = oData.total_amount_paise || 200;
+        const totalRupeesStr = (totalPaise % 100 === 0) ? `${totalPaise / 100}` : (totalPaise / 100).toFixed(2);
         order = {
           id: oData.id,
           orderNumber: oData.order_number,
@@ -77,11 +79,13 @@ export async function POST(req: NextRequest) {
           selectedPageRanges: oData.selected_page_ranges,
           calculatedPrintPages: oData.calculated_print_pages,
           calculatedSheets: oData.calculated_sheets,
-          copies: oData.copies,
+          copies: oData.copies || 1,
           colorMode: oData.color_mode,
           duplexMode: oData.duplex_mode,
           paperSize: oData.paper_size,
-          totalAmountRupees: `₹${(oData.total_amount_paise / 100).toFixed(2)}`,
+          amount: totalRupeesStr,
+          totalAmountPaise: totalPaise,
+          totalAmountRupees: `₹${totalRupeesStr}`,
           paymentStatus: oData.payment_status,
           orderStatus: oData.order_status,
           machineCode: oData.machine_code,
@@ -102,9 +106,14 @@ export async function POST(req: NextRequest) {
             { status: 400 }
           );
         }
+        const memPaise = dbOrder.totalAmountPaise || 200;
+        const memRupeesStr = (memPaise % 100 === 0) ? `${memPaise / 100}` : (memPaise / 100).toFixed(2);
         order = {
           ...dbOrder,
-          totalAmountRupees: `₹${((dbOrder.totalAmountPaise || 200) / 100).toFixed(2)}`,
+          copies: dbOrder.copies || 1,
+          amount: memRupeesStr,
+          totalAmountPaise: memPaise,
+          totalAmountRupees: `₹${memRupeesStr}`,
         };
       }
       if (machineCode && !machine) {

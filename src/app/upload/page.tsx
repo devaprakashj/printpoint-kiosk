@@ -446,8 +446,12 @@ export default function QwikprintAuthenticApp() {
       subtotalPaise: grandTotalPaise,
       taxPaise: 0,
       totalAmountPaise: grandTotalPaise,
-      formattedTotalRupees: `₹${(grandTotalPaise / 100).toFixed(0)}`,
-      formattedSubtotalRupees: `₹${(grandTotalPaise / 100).toFixed(0)}`,
+      formattedTotalRupees: (grandTotalPaise % 100 === 0) 
+        ? `₹${(grandTotalPaise / 100).toFixed(0)}` 
+        : `₹${(grandTotalPaise / 100).toFixed(2)}`,
+      formattedSubtotalRupees: (grandTotalPaise % 100 === 0) 
+        ? `₹${(grandTotalPaise / 100).toFixed(0)}` 
+        : `₹${(grandTotalPaise / 100).toFixed(2)}`,
     });
   }, [filesList]);
 

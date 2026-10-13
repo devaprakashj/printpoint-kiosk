@@ -1098,7 +1098,17 @@ export default function AutonomousTouchscreenKiosk() {
                     Total Amount
                   </span>
                   <div className="text-3xl font-black text-slate-900 font-mono">
-                    ₹ {activeOrder.amount || 10}
+                    ₹ {
+                      activeOrder.amount 
+                        ? activeOrder.amount 
+                        : activeOrder.totalAmountRupees 
+                        ? activeOrder.totalAmountRupees.replace('₹', '').trim()
+                        : activeOrder.total_amount_paise 
+                        ? (activeOrder.total_amount_paise / 100).toFixed(2)
+                        : activeOrder.totalAmountPaise 
+                        ? (activeOrder.totalAmountPaise / 100).toFixed(2)
+                        : '2.00'
+                    }
                   </div>
                   <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-black">
                     <CheckCircle className="h-3.5 w-3.5 text-emerald-600" />

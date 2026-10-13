@@ -461,53 +461,59 @@ def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_p
 
             # -c: CRITICAL - forces CUPS to copy the file to its internal spool immediately
             # so that subsequent DoD shredding of local_file does not destroy the file while CUPS filters it!
-            lp_cmd = ["lp", "-c", "-d", printer_name, "-n", str(actual_copies)]
-            if is_duplex:
-                lp_cmd.extend(["-o", "sides=two-sided-long-edge", "-o", "Duplex=DuplexNoTumble"])
-            else:
-                lp_cmd.extend(["-o", "sides=one-sided", "-o", "Duplex=None"])
-            lp_cmd.extend(["-o", "media=A4", "-o", "PageSize=A4", "-o", "InputSlot=Auto", "-o", "MediaType=Auto", "-o", "fit-to-page", print_file])
-            res = subprocess.run(lp_cmd, check=True, timeout=20, capture_output=True, text=True)
-            cups_out = res.stdout.strip() or f"request id is {printer_name} (1 file)"
+            all_spool_msgs = []
+            for copy_idx in range(1, actual_copies + 1):
+                if actual_copies > 1:
+                    print(f"  {CYAN}[DISPATCH]{RESET} Submitting copy {copy_idx} of {actual_copies} to CUPS...", flush=True)
 
-            # Track job in CUPS queue until physical hardware confirms completion
-            match = re.search(r'request id is ([^\s]+)', cups_out)
-            if match:
-                job_id = match.group(1)
-                confirmed_complete = False
-                print(f"  {CYAN}[CUPS TRACK]{RESET} Awaiting physical hardware completion for job {job_id}...", flush=True)
+                lp_cmd = ["lp", "-c", "-d", printer_name]
+                if is_duplex:
+                    lp_cmd.extend(["-o", "sides=two-sided-long-edge", "-o", "Duplex=DuplexNoTumble"])
+                else:
+                    lp_cmd.extend(["-o", "sides=one-sided", "-o", "Duplex=None"])
+                lp_cmd.extend(["-o", "media=A4", "-o", "PageSize=A4", "-o", "InputSlot=Auto", "-o", "MediaType=Auto", "-o", "fit-to-page", print_file])
+                res = subprocess.run(lp_cmd, check=True, timeout=20, capture_output=True, text=True)
+                cups_out = res.stdout.strip() or f"request id is {printer_name} (copy {copy_idx})"
 
-                # Wait up to 60 seconds for CUPS to confirm physical job completion
-                for sec in range(60):
-                    time.sleep(1.0)
+                # Track job in CUPS queue until physical hardware confirms completion
+                match = re.search(r'request id is ([^\s]+)', cups_out)
+                if match:
+                    job_id = match.group(1)
+                    confirmed_complete = False
+                    print(f"  {CYAN}[CUPS TRACK]{RESET} Awaiting physical hardware completion for job {job_id}...", flush=True)
 
-                    # 1. Check if job is listed in CUPS completed history
-                    completed_stat = subprocess.run(['lpstat', '-W', 'completed', '-o', printer_name], capture_output=True, text=True).stdout
-                    if job_id in completed_stat:
-                        confirmed_complete = True
-                        print(f"  {GREEN}[CUPS HARDWARE CONFIRMED]{RESET} Job {job_id} reached completed state in {sec+1}s", flush=True)
-                        break
+                    # Wait up to 60 seconds for CUPS to confirm physical job completion
+                    for sec in range(60):
+                        time.sleep(1.0)
 
-                    # 2. Check active status specifically for THIS job_id
-                    job_stat = subprocess.run(['lpstat', '-l', job_id], capture_output=True, text=True).stdout
-                    if job_stat:
-                        lower_js = job_stat.lower()
-                        if "stopped" in lower_js or "the print file could not be opened" in lower_js:
-                            subprocess.run(['cancel', job_id], capture_output=True)
-                            return False, f"CUPS job {job_id} stopped with error: {job_stat.strip()}"
-                    else:
-                        # Job is no longer in 'not-completed' queue, re-check completed once more
-                        time.sleep(0.5)
-                        re_check = subprocess.run(['lpstat', '-W', 'completed', '-o', printer_name], capture_output=True, text=True).stdout
-                        if job_id in re_check:
+                        # 1. Check if job is listed in CUPS completed history
+                        completed_stat = subprocess.run(['lpstat', '-W', 'completed', '-o', printer_name], capture_output=True, text=True).stdout
+                        if job_id in completed_stat:
                             confirmed_complete = True
-                            print(f"  {GREEN}[CUPS HARDWARE CONFIRMED]{RESET} Job {job_id} completed successfully!", flush=True)
+                            print(f"  {GREEN}[CUPS HARDWARE CONFIRMED]{RESET} Job {job_id} reached completed state in {sec+1}s", flush=True)
                             break
 
-                if not confirmed_complete:
-                    return False, f"CUPS Hardware Timeout: Job {job_id} did not confirm physical print completion within 60s"
+                        # 2. Check active status specifically for THIS job_id
+                        job_stat = subprocess.run(['lpstat', '-l', job_id], capture_output=True, text=True).stdout
+                        if job_stat:
+                            lower_js = job_stat.lower()
+                            if "stopped" in lower_js or "the print file could not be opened" in lower_js:
+                                subprocess.run(['cancel', job_id], capture_output=True)
+                                return False, f"CUPS job {job_id} stopped with error: {job_stat.strip()}"
+                        else:
+                            time.sleep(0.5)
+                            re_check = subprocess.run(['lpstat', '-W', 'completed', '-o', printer_name], capture_output=True, text=True).stdout
+                            if job_id in re_check:
+                                confirmed_complete = True
+                                print(f"  {GREEN}[CUPS HARDWARE CONFIRMED]{RESET} Job {job_id} completed successfully!", flush=True)
+                                break
 
-            return True, f"Sent to CUPS -> [{printer_name}] ({cups_out}) [Hardware Confirmed]"
+                    if not confirmed_complete:
+                        return False, f"CUPS Hardware Timeout: Job {job_id} did not confirm physical print completion within 60s"
+
+                all_spool_msgs.append(cups_out)
+
+            return True, f"Sent to CUPS -> [{printer_name}] ({', '.join(all_spool_msgs)}) [Hardware Confirmed: {actual_copies} copy/copies]"
         except Exception as e:
             return False, f"CUPS error: {e}"
 
