@@ -506,15 +506,12 @@ export default function AutonomousTouchscreenKiosk() {
         console.error('Job status check failed:', err);
       }
 
-      // Timeout fallback after 30 seconds
+      // Timeout if printer does not acknowledge within 35 seconds
       if (attempts >= maxAttempts) {
         clearInterval(pollTimer);
-        setPrintProgress(100);
-        setPrintStep(4);
-        playTouchTone(1320, 0.4);
-        setTimeout(() => {
-          setCurrentScreen('print_complete');
-        }, 800);
+        alert('Hardware Timeout: The printer did not acknowledge paper feed within 30 seconds. Please check the printer paper tray or connection.');
+        resetToHome();
+        return;
       }
     }, checkInterval);
   };
