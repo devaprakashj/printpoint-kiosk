@@ -63,31 +63,21 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Always update in-memory DB as well
+    // Always update in-memory DB as well (set to 'printing', NOT 'completed' - completion waits for CUPS confirmation)
     const targetKey = order?.id || orderId || pin;
     if (targetKey) {
-      db.updateOrderStatus(targetKey, 'completed', {
+      db.updateOrderStatus(targetKey, 'printing', {
         paymentStatus: 'paid',
-        fileShredded: true,
-        shreddedAt: completedAt,
-        completedAt: completedAt,
         pinUsedAt: completedAt,
-        shredMethod: 'DoD 5220.22-M Cryptographic Zero-Wipe (0 bytes retained)',
-        fileStorageUrl: undefined,
       });
     }
 
     if (pin) {
       const memByPin = db.findAnyOrderByPin(pin);
       if (memByPin) {
-        db.updateOrderStatus(memByPin.id, 'completed', {
+        db.updateOrderStatus(memByPin.id, 'printing', {
           paymentStatus: 'paid',
-          fileShredded: true,
-          shreddedAt: completedAt,
-          completedAt: completedAt,
           pinUsedAt: completedAt,
-          shredMethod: 'DoD 5220.22-M Cryptographic Zero-Wipe (0 bytes retained)',
-          fileStorageUrl: undefined,
         });
       }
     }
@@ -127,12 +117,11 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: 'Print job dispatched and delivered successfully. All document files shredded.',
+      message: 'Print job dispatched to CUPS hardware spooler. Printing in progress.',
       orderId: order?.id || orderId,
-      orderStatus: 'completed',
-      deliveryConfirmed: true,
-      secureFileShredded: true,
-      shredMethod: 'DoD 5220.22-M Cryptographic Zero-Wipe (0 bytes retained)',
+      orderStatus: 'printing',
+      deliveryConfirmed: false,
+      secureFileShredded: false,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';

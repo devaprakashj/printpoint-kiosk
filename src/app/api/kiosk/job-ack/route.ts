@@ -17,6 +17,14 @@ export async function POST(req: NextRequest) {
     if (orderNumber) db.setHardwareJobStatus(orderNumber, status, statusMsg);
     if (pin) db.setHardwareJobStatus(String(pin).trim(), status, statusMsg);
 
+    const nowIso = new Date().toISOString();
+    if (orderId) db.updateOrderStatus(orderId, status, { fileShredded: success, completedAt: nowIso });
+    if (orderNumber) db.updateOrderStatus(orderNumber, status, { fileShredded: success, completedAt: nowIso });
+    if (pin) {
+      const memOrd = db.findAnyOrderByPin(String(pin).trim());
+      if (memOrd) db.updateOrderStatus(memOrd.id, status, { fileShredded: success, completedAt: nowIso });
+    }
+
     if (isSupabaseConfigured && supabaseAdmin) {
       try {
         let q = supabaseAdmin.from('orders').select('id, file_storage_url');
