@@ -251,18 +251,20 @@ export default function AutonomousTouchscreenKiosk() {
 
   // Handle scanned data string from customer's phone QR code
   const handleScannedQrData = useCallback((dataString: string) => {
-    if (currentScreen !== 'scan_qr' && currentScreen !== 'enter_pin') return;
+    // Prevent scanning only during actual document printing or collection
+    if (currentScreen === 'printing' || currentScreen === 'collect_documents') return;
 
     try {
       let pin = '';
-      if (dataString.trim().startsWith('{')) {
-        const parsed = JSON.parse(dataString);
+      const trimmed = dataString.trim();
+      if (trimmed.startsWith('{')) {
+        const parsed = JSON.parse(trimmed);
         pin = parsed.pin || parsed.fourDigitPin || '';
-      } else if (dataString.includes('pin=')) {
-        const url = new URL(dataString, 'http://localhost');
+      } else if (trimmed.includes('pin=')) {
+        const url = new URL(trimmed, 'http://localhost');
         pin = url.searchParams.get('pin') || '';
       } else {
-        const match = dataString.match(/\b\d{4}\b/);
+        const match = trimmed.match(/\b\d{4}\b/);
         if (match) pin = match[0];
       }
 
@@ -319,7 +321,8 @@ export default function AutonomousTouchscreenKiosk() {
   // USB Barcode Scanner hardware listener (for dedicated physical 2D scanners)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (currentScreen !== 'scan_qr' && currentScreen !== 'enter_pin') return;
+      // Don't intercept if already in printing or collecting stage
+      if (currentScreen === 'printing' || currentScreen === 'collect_documents') return;
 
       if (e.key === 'Enter') {
         if (barcodeBufferRef.current.length >= 4) {
@@ -335,7 +338,7 @@ export default function AutonomousTouchscreenKiosk() {
         if (barcodeTimerRef.current) clearTimeout(barcodeTimerRef.current);
         barcodeTimerRef.current = setTimeout(() => {
           barcodeBufferRef.current = '';
-        }, 300);
+        }, 500);
       }
     };
 
