@@ -544,6 +544,19 @@ def trigger_pin_release(server_url: str, machine_code: str, pin: str):
         print(f"\n{RED}[SCANNER ERROR] Failed to release PIN {pin}: {e}{RESET}", flush=True)
 
 
+def check_is_kiosk_scanner_active(server_url: str, machine_code: str) -> tuple[bool, str]:
+    """Checks if customer has touched the screen and clicked 'Scan QR Pass'."""
+    url = f"{server_url.rstrip('/')}/api/kiosk/state?machineCode={machine_code}"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "SmartPrint-Pi5-Scanner/2.4"})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return bool(data.get("isScannerActive", False)), str(data.get("currentScreen", "home"))
+    except Exception:
+        # Fallback to True if server state endpoint is unreachable
+        return True, "active"
+
+
 def start_hardware_scanner_listener(server_url: str, machine_code: str):
     """Starts a non-blocking background thread that captures MH-ET LIVE USB HID scanner events directly."""
     if platform.system() != "Linux":
@@ -602,7 +615,18 @@ def start_hardware_scanner_listener(server_url: str, machine_code: str):
                                     scanned_str = "".join(chars).strip()
                                     chars = []
                                     if scanned_str:
-                                        print(f"\n{GREEN}{BOLD}[QR SCANNED]{RESET} Raw input: {scanned_str[:80]}", flush=True)
+                                        # STRICT FILTER 1: Reject 1D linear product barcodes (e.g. 8-14 pure digits like EAN/UPC)
+                                        if re.match(r'^\d{8,14}$', scanned_str):
+                                            print(f"\n{YELLOW}[1D BARCODE REJECTED] Scanned input '{scanned_str}' is a 1D linear barcode. Only 2D QR Codes are accepted.{RESET}", flush=True)
+                                            continue
+
+                                        # STRICT FILTER 2: Check if Kiosk UI is currently in 'Scan QR Pass' screen
+                                        is_active, current_screen = check_is_kiosk_scanner_active(server_url, machine_code)
+                                        if not is_active:
+                                            print(f"\n{YELLOW}[SCANNER STANDBY - OFF] Ignored scan. Kiosk is on '{current_screen}' screen. Scanner is OFF until customer clicks 'Scan QR Pass' on the touchscreen.{RESET}", flush=True)
+                                            continue
+
+                                        print(f"\n{GREEN}{BOLD}[QR SCANNED - ACTIVE]{RESET} Raw input: {scanned_str[:80]}", flush=True)
                                         pin = None
                                         if scanned_str.startswith('{'):
                                             try:

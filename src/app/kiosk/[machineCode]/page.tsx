@@ -239,24 +239,46 @@ export default function AutonomousTouchscreenKiosk() {
     }
   }, []);
 
-  // Control camera on screen change
+  // Control camera and notify server of scanner active/inactive state on screen change
   useEffect(() => {
+    // Notify server/daemon whether the physical scanner should be active
+    const isScannerActive = currentScreen === 'scan_qr';
+    try {
+      fetch('/api/kiosk/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          machineCode,
+          currentScreen,
+          isScannerActive,
+        }),
+      }).catch(() => {});
+    } catch {}
+
     if (currentScreen === 'scan_qr') {
       startCamera();
     } else {
       stopCamera();
     }
     return () => stopCamera();
-  }, [currentScreen]);
+  }, [currentScreen, machineCode]);
 
   // Handle scanned data string from customer's phone QR code
   const handleScannedQrData = useCallback((dataString: string) => {
-    // Prevent scanning only during actual document printing or collection
-    if (currentScreen === 'printing' || currentScreen === 'collect_documents') return;
+    // STRICT: Only accept scans when user is on the 'scan_qr' screen!
+    if (currentScreen !== 'scan_qr') return;
 
     try {
-      let pin = '';
       const trimmed = dataString.trim();
+
+      // STRICT: Reject 1D linear product barcodes (e.g. 8-14 digit pure numeric barcodes like EAN-13, UPC-A, Code 128)
+      if (/^\d{8,14}$/.test(trimmed)) {
+        console.warn('1D Linear barcode detected and ignored. Only 2D QR Code is permitted:', trimmed);
+        setCameraError('1D barcode detected. Please scan the 2D QR Code from your mobile screen!');
+        return;
+      }
+
+      let pin = '';
       if (trimmed.startsWith('{')) {
         const parsed = JSON.parse(trimmed);
         pin = parsed.pin || parsed.fourDigitPin || '';
@@ -319,14 +341,22 @@ export default function AutonomousTouchscreenKiosk() {
   }, [isCameraActive, barcodeDetectorSupported, currentScreen, handleScannedQrData]);
 
   // USB Barcode Scanner hardware listener (for dedicated physical 2D scanners)
+  // STRICT: Only active when user clicked "Scan QR Pass" (currentScreen === 'scan_qr')!
+  // On 'home', 'choose_method', 'enter_pin', 'printing', etc. scanner input is OFF.
   useEffect(() => {
+    if (currentScreen !== 'scan_qr') {
+      barcodeBufferRef.current = '';
+      if (barcodeTimerRef.current) clearTimeout(barcodeTimerRef.current);
+      return;
+    }
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't intercept if already in printing or collecting stage
-      if (currentScreen === 'printing' || currentScreen === 'collect_documents') return;
+      if (currentScreen !== 'scan_qr') return;
 
       if (e.key === 'Enter') {
-        if (barcodeBufferRef.current.length >= 4) {
-          handleScannedQrData(barcodeBufferRef.current);
+        const buffered = barcodeBufferRef.current.trim();
+        if (buffered.length >= 4) {
+          handleScannedQrData(buffered);
         }
         barcodeBufferRef.current = '';
         if (barcodeTimerRef.current) clearTimeout(barcodeTimerRef.current);
