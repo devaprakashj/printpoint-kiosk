@@ -26,7 +26,7 @@ export async function GET(
     if (mData) {
       const isHeartbeatFresh = Boolean(
         mData.last_heartbeat_at &&
-        (Date.now() - new Date(mData.last_heartbeat_at).getTime() < 30000)
+        (Date.now() - new Date(mData.last_heartbeat_at).getTime() < 75000)
       );
 
       machine = {

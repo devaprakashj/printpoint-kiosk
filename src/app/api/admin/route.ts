@@ -24,10 +24,10 @@ export async function GET(req: NextRequest) {
       if (mRes.data) {
         machines = mRes.data.map((m: any) => {
           const lastHbTime = m.last_heartbeat_at ? new Date(m.last_heartbeat_at).getTime() : 0;
-          // Machine is only online if python daemon sent a heartbeat within the last 20 seconds
+          // Machine is only online if python daemon sent a heartbeat within the last 75 seconds
           const isAlive = Boolean(
             m.last_heartbeat_at &&
-            (Date.now() - lastHbTime) < 20000 &&
+            (Date.now() - lastHbTime) < 75000 &&
             m.status !== 'offline'
           );
           const machineStatus = isAlive ? 'online' : 'offline';

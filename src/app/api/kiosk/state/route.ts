@@ -46,13 +46,13 @@ export async function GET(req: NextRequest) {
 
     const state = kioskScreenStates[cleanCode];
 
-    // Default to inactive/home if not set or stale (> 3 minutes)
+    // Default to active ready_to_scan for autonomous kiosk
     if (!state || Date.now() - state.updatedAt > 180000) {
       return NextResponse.json({
         success: true,
         machineCode: cleanCode,
-        currentScreen: 'home',
-        isScannerActive: false,
+        currentScreen: 'ready_to_scan',
+        isScannerActive: true,
         isStale: true,
       });
     }

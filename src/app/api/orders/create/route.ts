@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
         // STRICT OPERATIONAL CHECK: Machine MUST be online and NOT in maintenance
         const isHeartbeatFresh = Boolean(
           mData.last_heartbeat_at &&
-          (Date.now() - new Date(mData.last_heartbeat_at).getTime() < 45000)
+          (Date.now() - new Date(mData.last_heartbeat_at).getTime() < 75000)
         );
 
         if (mData.status === 'maintenance') {

@@ -42,3 +42,10 @@ next-env.d.ts
 # python
 __pycache__/
 *.pyc
+
+# Scratch & test dumps
+setting_manual.pdf
+scripts/*.pdf
+scripts/*.png
+scripts/barcodes/
+scripts/pdf_dump.txt

@@ -149,7 +149,20 @@ export default function QwikprintAuthenticApp() {
       if (data.success && data.machines) {
         setMachines(data.machines);
         const match = data.machines.find((m: Machine) => m.machineCode === selectedMachineCode) || data.machines[0];
-        setCurrentMachine(match);
+        if (match) {
+          setCurrentMachine(prev => {
+            if (!prev) return match;
+            if (
+              prev.id === match.id &&
+              prev.status === match.status &&
+              prev.currentSheetsRemaining === match.currentSheetsRemaining &&
+              prev.paperStatus === match.paperStatus
+            ) {
+              return prev;
+            }
+            return match;
+          });
+        }
       }
 
       const pRes = await fetch(`/api/kiosk/${selectedMachineCode}`, { cache: 'no-store' });
@@ -162,10 +175,10 @@ export default function QwikprintAuthenticApp() {
     }
   };
 
-  // Live 3-second heartbeat polling so Python daemon on/off and Admin Ops toggles reflect instantly
+  // Live polling so Python daemon on/off and Admin Ops toggles reflect smoothly
   useEffect(() => {
     loadKiosks();
-    const interval = setInterval(loadKiosks, 3000);
+    const interval = setInterval(loadKiosks, 10000);
     return () => clearInterval(interval);
   }, [selectedMachineCode]);
 
@@ -553,9 +566,9 @@ export default function QwikprintAuthenticApp() {
         const thumbs: string[] = [];
         let firstPageOrientation: 'portrait' | 'landscape' = 'portrait';
 
-        for (let i = 1; i <= Math.min(count, 50); i++) {
+        for (let i = 1; i <= Math.min(count, 3); i++) {
           const page = await pdf.getPage(i);
-          const viewport = page.getViewport({ scale: 1.2 }); // Full crisp scale for crystal-clear text
+          const viewport = page.getViewport({ scale: 0.75 }); // Fast, lightweight and memory-safe for mobile devices
           if (i === 1) {
             firstPageOrientation = viewport.width > viewport.height ? 'landscape' : 'portrait';
           }
@@ -566,7 +579,7 @@ export default function QwikprintAuthenticApp() {
 
           if (ctx) {
             await page.render({ canvasContext: ctx, viewport }).promise;
-            thumbs.push(canvas.toDataURL('image/jpeg', 0.92));
+            thumbs.push(canvas.toDataURL('image/jpeg', 0.8));
           }
         }
 
@@ -1607,7 +1620,7 @@ export default function QwikprintAuthenticApp() {
         ref={fileInputRef}
         type="file"
         multiple
-        accept=".pdf,.doc,.docx,.pptx,.ppt,.xlsx,.xls,.csv,.txt,.md,.rtf,image/*"
+        accept=".pdf,application/pdf,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.pptx,.ppt,.xlsx,.xls,.csv,.txt,image/*"
         onChange={handleFileChange}
         className="hidden"
       />

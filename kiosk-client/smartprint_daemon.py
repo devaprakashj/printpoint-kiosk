@@ -598,10 +598,17 @@ def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_p
     return True, f"Dispatched to [{printer_name}]"
 
 
-def trigger_pin_release(server_url: str, machine_code: str, pin: str):
+def trigger_pin_release(server_url: str, machine_code: str, pin: str = None, order_id: str = None, order_number: str = None):
     """Calls Next.js API /api/pin/release to verify and release the order into the print queue."""
     url = f"{server_url.rstrip('/')}/api/pin/release"
-    payload = {"pin": str(pin).strip(), "machineCode": machine_code}
+    payload = {"machineCode": machine_code}
+    if pin:
+        payload["pin"] = str(pin).strip()
+    if order_id:
+        payload["orderId"] = str(order_id).strip()
+    if order_number:
+        payload["orderNumber"] = str(order_number).strip()
+
     try:
         req = urllib.request.Request(
             url,
@@ -612,28 +619,28 @@ def trigger_pin_release(server_url: str, machine_code: str, pin: str):
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             if data.get("success"):
-                print(f"\n{GREEN}{BOLD}[SCANNER SUCCESS] Order released for PIN {pin}! Printing will commence on next pulse...{RESET}", flush=True)
+                label = pin or order_id or order_number or "QR Pass"
+                print(f"\n{GREEN}{BOLD}[SCANNER SUCCESS] Order released for {label}! Printing will commence on next pulse...{RESET}", flush=True)
             else:
-                print(f"\n{YELLOW}[SCANNER NOTICE] PIN {pin} verify returned: {data.get('error', 'unknown error')}{RESET}", flush=True)
+                print(f"\n{YELLOW}[SCANNER NOTICE] Verify returned: {data.get('error', 'unknown error')}{RESET}", flush=True)
     except Exception as e:
-        print(f"\n{RED}[SCANNER ERROR] Failed to release PIN {pin}: {e}{RESET}", flush=True)
+        print(f"\n{RED}[SCANNER ERROR] Failed to release order: {e}{RESET}", flush=True)
 
 
 def check_is_kiosk_scanner_active(server_url: str, machine_code: str) -> tuple[bool, str]:
-    """Checks if customer has touched the screen and clicked 'Scan QR Pass'."""
+    """Checks if Kiosk UI is online and ready."""
     url = f"{server_url.rstrip('/')}/api/kiosk/state?machineCode={machine_code}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "SmartPrint-Pi5-Scanner/2.4"})
         with urllib.request.urlopen(req, timeout=3) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            return bool(data.get("isScannerActive", False)), str(data.get("currentScreen", "home"))
+            return bool(data.get("isScannerActive", True)), str(data.get("currentScreen", "ready_to_scan"))
     except Exception:
-        # Fallback to True if server state endpoint is unreachable
-        return True, "active"
+        return True, "ready_to_scan"
 
 
-def set_scanner_hardware_power(enable: bool) -> bool:
-    """Toggles physical 5V USB power to MH-ET LIVE scanner via uhubctl on Raspberry Pi 5."""
+def set_scanner_hardware_power(enable: bool = True) -> bool:
+    """Powers ON physical 5V USB power to MH-ET LIVE scanner via uhubctl on Raspberry Pi 5."""
     if platform.system() != "Linux":
         return True
     uhubctl_bin = "/usr/sbin/uhubctl" if os.path.exists("/usr/sbin/uhubctl") else "uhubctl"
@@ -647,32 +654,13 @@ def set_scanner_hardware_power(enable: bool) -> bool:
 
 
 def start_hardware_scanner_listener(server_url: str, machine_code: str):
-    """Starts background threads that manage physical scanner power and capture HID events."""
+    """Starts background listener that captures HID scanner events (24/7 Always Ready to Scan)."""
     if platform.system() != "Linux":
         return
 
-    # Track hardware power state (initial state: start OFF until user clicks 'Scan QR Pass')
-    hardware_power_state = {"powered_on": True}
-
-    def power_supervisor_loop():
-        """Monitors Kiosk screen state every 0.8s and physically cuts/restores USB power."""
-        while True:
-            try:
-                is_active, current_screen = check_is_kiosk_scanner_active(server_url, machine_code)
-                if is_active and not hardware_power_state["powered_on"]:
-                    print(f"\n{GREEN}{BOLD}[HARDWARE SCANNER POWER ON]{RESET} Kiosk entered 'Scan QR Pass' screen. Powering ON MH-ET LIVE scanner!", flush=True)
-                    set_scanner_hardware_power(True)
-                    hardware_power_state["powered_on"] = True
-                elif not is_active and hardware_power_state["powered_on"]:
-                    print(f"\n{YELLOW}[HARDWARE SCANNER POWER OFF]{RESET} Kiosk on '{current_screen}' screen. Cutting USB power to scanner (OFF).", flush=True)
-                    set_scanner_hardware_power(False)
-                    hardware_power_state["powered_on"] = False
-            except Exception:
-                pass
-            time.sleep(0.8)
-
-    p_thread = threading.Thread(target=power_supervisor_loop, daemon=True, name="ScannerPowerSupervisor")
-    p_thread.start()
+    # Ensure physical USB 5V power to the MH-ET LIVE scanner is powered ON
+    print(f"\n{GREEN}{BOLD}[HARDWARE SCANNER]{RESET} Ensuring 5V USB power is ON (Always Ready to Scan)...", flush=True)
+    set_scanner_hardware_power(True)
 
     def listener_loop():
         # Linux EV_KEY decoding table
@@ -697,11 +685,11 @@ def start_hardware_scanner_listener(server_url: str, machine_code: str):
                 glob.glob('/dev/input/by-id/*scanner*')
             )
             if not devs:
-                time.sleep(0.5)
+                time.sleep(1.0)
                 continue
 
             dev_path = devs[0]
-            print(f"  {CYAN}[HARDWARE SCANNER]{RESET} Listening on {os.path.basename(dev_path)}...", flush=True)
+            print(f"  {CYAN}[HARDWARE SCANNER]{RESET} Listening on {os.path.basename(dev_path)} (Ready to scan)...", flush=True)
 
             try:
                 with open(dev_path, 'rb') as f:
@@ -711,7 +699,6 @@ def start_hardware_scanner_listener(server_url: str, machine_code: str):
                         try:
                             data = f.read(24)
                         except (OSError, ValueError):
-                            # Device powered down or reconnected by supervisor
                             break
                         if not data or len(data) < 24:
                             continue
@@ -731,39 +718,39 @@ def start_hardware_scanner_listener(server_url: str, machine_code: str):
                                     scanned_str = "".join(chars).strip()
                                     chars = []
                                     if scanned_str:
-                                        # STRICT FILTER 1: Reject 1D linear product barcodes (e.g. 8-14 pure digits like EAN/UPC)
+                                        # Filter 1: Reject 1D linear product barcodes (8-14 pure digits)
                                         if re.match(r'^\d{8,14}$', scanned_str):
-                                            print(f"\n{YELLOW}[1D BARCODE REJECTED] Scanned input '{scanned_str}' is a 1D linear barcode. Only 2D QR Codes are accepted.{RESET}", flush=True)
+                                            print(f"\n{YELLOW}[1D BARCODE REJECTED] Scanned input '{scanned_str}' is a 1D barcode. Only 2D QR Codes are accepted.{RESET}", flush=True)
                                             continue
 
-                                        # STRICT FILTER 2: Check if Kiosk UI is currently in 'Scan QR Pass' screen
-                                        is_active, current_screen = check_is_kiosk_scanner_active(server_url, machine_code)
-                                        if not is_active:
-                                            print(f"\n{YELLOW}[SCANNER STANDBY - OFF] Ignored scan. Kiosk is on '{current_screen}' screen. Scanner is OFF until customer clicks 'Scan QR Pass' on the touchscreen.{RESET}", flush=True)
-                                            continue
-
-                                        print(f"\n{GREEN}{BOLD}[QR SCANNED - ACTIVE]{RESET} Raw input: {scanned_str[:80]}", flush=True)
+                                        print(f"\n{GREEN}{BOLD}[QR SCANNED - READY TO SCAN]{RESET} Raw input: {scanned_str[:80]}", flush=True)
                                         pin = None
+                                        order_id = None
+                                        order_num = None
+
                                         if scanned_str.startswith('{'):
                                             try:
                                                 parsed = json.loads(scanned_str)
                                                 pin = parsed.get('pin') or parsed.get('fourDigitPin')
+                                                order_id = parsed.get('orderId') or parsed.get('id')
+                                                order_num = parsed.get('orderNumber')
                                             except Exception:
                                                 pass
-                                        if not pin:
+
+                                        if not pin and not order_id:
                                             match = re.search(r'\b\d{4}\b', scanned_str)
                                             if match:
                                                 pin = match.group(0)
 
-                                        if pin:
-                                            print(f"  {CYAN}[AUTO-TRIGGER]{RESET} Extracted PIN: {BOLD}{pin}{RESET}. Triggering print release...", flush=True)
-                                            trigger_pin_release(server_url, machine_code, pin)
+                                        if pin or order_id or order_num:
+                                            print(f"  {CYAN}[AUTO-TRIGGER]{RESET} Order target: PIN={pin}, OrderID={order_id}. Triggering print release...", flush=True)
+                                            trigger_pin_release(server_url, machine_code, pin=pin, order_id=order_id, order_number=order_num)
                                         else:
-                                            print(f"  {YELLOW}[SCANNER WARNING] Could not find 4-digit PIN in: {scanned_str}{RESET}", flush=True)
+                                            print(f"  {YELLOW}[SCANNER WARNING] Could not find PIN or Order in: {scanned_str}{RESET}", flush=True)
                                 elif c:
                                     chars.append(c)
             except Exception:
-                time.sleep(0.5)
+                time.sleep(1.0)
 
     t = threading.Thread(target=listener_loop, daemon=True, name="HardwareScannerListener")
     t.start()

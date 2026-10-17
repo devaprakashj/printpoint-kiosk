@@ -18,7 +18,7 @@ export async function GET() {
         const machines = data.map((m: any) => {
           const isHeartbeatFresh = Boolean(
             m.last_heartbeat_at &&
-            (Date.now() - new Date(m.last_heartbeat_at).getTime() < 20000)
+            (Date.now() - new Date(m.last_heartbeat_at).getTime() < 75000)
           );
           const computedStatus = (isHeartbeatFresh && m.status !== 'offline') ? 'online' : 'offline';
 

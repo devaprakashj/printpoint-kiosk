@@ -135,8 +135,8 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Dead-man switch: Mark any machine with heartbeat older than 45 seconds as 'offline'
-    const cutoffTime = new Date(Date.now() - 45 * 1000).toISOString();
+    // Dead-man switch: Mark any machine with heartbeat older than 75 seconds as 'offline'
+    const cutoffTime = new Date(Date.now() - 75 * 1000).toISOString();
     if (isSupabaseConfigured && supabaseAdmin) {
       await supabaseAdmin
         .from('machines')
@@ -148,7 +148,7 @@ export async function POST(req: NextRequest) {
     // Update in-memory machines dead-man switch
     const allMemMachines = db.getMachines();
     allMemMachines.forEach((m: any) => {
-      if (m.lastHeartbeatAt && new Date(m.lastHeartbeatAt).getTime() < Date.now() - 45 * 1000) {
+      if (m.lastHeartbeatAt && new Date(m.lastHeartbeatAt).getTime() < Date.now() - 75 * 1000) {
         m.status = 'offline';
         m.activePrinterStatus = 'offline';
       }
