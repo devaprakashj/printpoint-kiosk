@@ -1875,9 +1875,36 @@ export default function SmartPrintOpsConsole() {
                               {isPrinterOnline ? 'Physically Plugged' : 'Cable Disconnected'}
                             </p>
                           </div>
-                          <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
+                          <div className={`p-2.5 rounded-lg border ${
+                            m.paperStatus === 'empty' || m.currentSheetsRemaining === 0
+                              ? 'bg-rose-50 border-rose-200'
+                              : m.paperStatus === 'low' || ((m.currentSheetsRemaining ?? 500) <= 50)
+                              ? 'bg-amber-50 border-amber-200'
+                              : 'bg-slate-50 border-slate-100'
+                          }`}>
                             <p className="text-slate-400 text-[10px]">Paper Tray Stock</p>
-                            <p className="font-semibold text-slate-800 mt-0.5 font-mono">{m.currentSheetsRemaining ?? 500} sheets</p>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className={`h-1.5 w-1.5 rounded-full ${
+                                m.paperStatus === 'empty' || m.currentSheetsRemaining === 0
+                                  ? 'bg-rose-500 animate-ping'
+                                  : m.paperStatus === 'low' || ((m.currentSheetsRemaining ?? 500) <= 50)
+                                  ? 'bg-amber-500 animate-pulse'
+                                  : 'bg-emerald-500'
+                              }`} />
+                              <p className={`font-semibold font-mono ${
+                                m.paperStatus === 'empty' || m.currentSheetsRemaining === 0
+                                  ? 'text-rose-700 font-bold'
+                                  : m.paperStatus === 'low' || ((m.currentSheetsRemaining ?? 500) <= 50)
+                                  ? 'text-amber-700 font-bold'
+                                  : 'text-slate-800'
+                              }`}>
+                                {m.paperStatus === 'empty' || m.currentSheetsRemaining === 0
+                                  ? 'Empty (0 sheets)'
+                                  : m.paperStatus === 'low' || ((m.currentSheetsRemaining ?? 500) <= 50)
+                                  ? `Low (${m.currentSheetsRemaining ?? 35} sheets)`
+                                  : `${m.currentSheetsRemaining ?? 500} sheets`}
+                              </p>
+                            </div>
                           </div>
                           <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100">
                             <p className="text-slate-400 text-[10px]">Spooler Status</p>
@@ -1939,9 +1966,13 @@ export default function SmartPrintOpsConsole() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {machinesList.map((m: any) => {
-                    const sheetsRem = m.currentSheetsRemaining || 480;
+                    const sheetsRem = typeof m.currentSheetsRemaining === 'number'
+                      ? m.currentSheetsRemaining
+                      : (m.paperStatus === 'empty' ? 0 : m.paperStatus === 'low' ? 35 : 500);
                     const totalCap = m.totalCapacitySheets || 500;
-                    const paperPct = Math.round((sheetsRem / totalCap) * 100);
+                    const paperPct = Math.min(100, Math.max(0, Math.round((sheetsRem / totalCap) * 100)));
+                    const isPaperEmpty = m.paperStatus === 'empty' || sheetsRem === 0;
+                    const isPaperLow = m.paperStatus === 'low' || (!isPaperEmpty && sheetsRem <= (m.lowPaperThreshold || 50));
                     const isHeartbeatFresh = m.lastHeartbeatAt
                       ? (Date.now() - new Date(m.lastHeartbeatAt).getTime() < 20000)
                       : false;
@@ -2049,15 +2080,36 @@ export default function SmartPrintOpsConsole() {
                         </div>
 
                         {/* Paper Progress Gauge */}
-                        <div className="space-y-1">
-                          <div className="flex justify-between text-xs text-slate-600">
-                            <span>Paper Tray</span>
-                            <span className="font-mono font-semibold text-slate-900">{sheetsRem} / {totalCap} ({paperPct}%)</span>
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between items-center text-xs">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-slate-600 font-medium">Paper Tray</span>
+                              {isPaperEmpty ? (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200 animate-pulse">
+                                  EMPTY
+                                </span>
+                              ) : isPaperLow ? (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200">
+                                  LOW STOCK
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                  NORMAL
+                                </span>
+                              )}
+                            </div>
+                            <span className={`font-mono font-semibold ${
+                              isPaperEmpty ? 'text-rose-600' : isPaperLow ? 'text-amber-600' : 'text-slate-900'
+                            }`}>
+                              {sheetsRem} / {totalCap} ({paperPct}%)
+                            </span>
                           </div>
-                          <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                          <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
                             <div
-                              className="h-full bg-[#2563eb] rounded-full transition-all"
-                              style={{ width: `${paperPct}%` }}
+                              className={`h-full rounded-full transition-all ${
+                                isPaperEmpty ? 'bg-rose-500' : isPaperLow ? 'bg-amber-500' : 'bg-emerald-500'
+                              }`}
+                              style={{ width: `${Math.max(paperPct, isPaperEmpty ? 0 : 4)}%` }}
                             />
                           </div>
                         </div>
@@ -2089,7 +2141,13 @@ export default function SmartPrintOpsConsole() {
                         <div className="grid grid-cols-4 gap-2 pt-1 border-t border-slate-100 text-xs">
                           <button
                             onClick={() => handleRefillPaper(m.machineCode, 500)}
-                            className="py-1.5 px-2 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 font-medium cursor-pointer text-center"
+                            className={`py-1.5 px-2 rounded-lg font-medium cursor-pointer text-center transition-colors ${
+                              isPaperEmpty
+                                ? 'bg-rose-600 hover:bg-rose-700 text-white font-bold animate-pulse'
+                                : isPaperLow
+                                ? 'bg-amber-500 hover:bg-amber-600 text-white font-semibold'
+                                : 'border border-slate-200 hover:bg-slate-50 text-slate-700'
+                            }`}
                           >
                             Refill (+500)
                           </button>

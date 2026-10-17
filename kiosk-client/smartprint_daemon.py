@@ -203,15 +203,22 @@ def send_heartbeat(server_url: str, machine_code: str, daemon_token: str, prefer
 
     # Query live hardware SNMP telemetry from network printer
     snmp_data = None
+    printer_ip = None
     for p in printers:
         port = p.get("port", "")
         ip_match = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', port)
         if ip_match:
             printer_ip = ip_match.group(0)
-            snmp_data = query_snmp_printer_status(printer_ip)
-            if snmp_data:
+            break
+
+    if not printer_ip:
+        printer_ip = os.environ.get("PRINTER_IP", "172.15.2.212")
+
+    if printer_ip:
+        snmp_data = query_snmp_printer_status(printer_ip)
+        if snmp_data:
+            for p in printers:
                 p["snmpHardwareStatus"] = snmp_data
-                break
 
     payload = {
         "machineCode": machine_code,
@@ -231,7 +238,10 @@ def send_heartbeat(server_url: str, machine_code: str, daemon_token: str, prefer
             payload["currentSheetsRemaining"] = 0
             payload["paperStatus"] = "empty"
         elif snmp_data.get("isPaperLow"):
+            payload["currentSheetsRemaining"] = 35
             payload["paperStatus"] = "low"
+        else:
+            payload["paperStatus"] = "ok"
 
     req_data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(

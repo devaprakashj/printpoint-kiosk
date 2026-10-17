@@ -93,6 +93,9 @@ export async function POST(req: NextRequest) {
         if (typeof currentSheetsRemaining === 'number') {
           updateData.current_sheets_remaining = currentSheetsRemaining;
         }
+        if (body.paperStatus) {
+          updateData.paper_status = body.paperStatus;
+        }
 
         await supabaseAdmin
           .from('machines')
@@ -128,6 +131,7 @@ export async function POST(req: NextRequest) {
         printerSpoolerName: (isPrinterConnected && physicalPrinter?.name) ? physicalPrinter.name : memMachine.printerSpoolerName,
         printerPortOrIp: physicalPrinter?.port || memMachine.printerPortOrIp || 'USB',
         ...(typeof currentSheetsRemaining === 'number' ? { currentSheetsRemaining } : {}),
+        ...(body.paperStatus ? { paperStatus: body.paperStatus } : {}),
       });
     }
 
