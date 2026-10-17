@@ -5,16 +5,43 @@ import { db } from '@/lib/db';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { pin, machineCode } = body;
+    let { pin, orderId, orderNumber, qrData, machineCode } = body;
 
-    if (!pin || String(pin).trim().length !== 4) {
+    // Parse qrData if provided
+    if (qrData) {
+      const trimmed = String(qrData).trim();
+      if (trimmed.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed.orderId) orderId = parsed.orderId;
+          if (parsed.orderNumber) orderNumber = parsed.orderNumber;
+          if (parsed.pin || parsed.fourDigitPin) pin = parsed.pin || parsed.fourDigitPin;
+        } catch {}
+      } else if (trimmed.includes('pin=')) {
+        try {
+          const url = new URL(trimmed, 'http://localhost');
+          pin = url.searchParams.get('pin');
+        } catch {}
+      } else if (/^\d{4}$/.test(trimmed)) {
+        pin = trimmed;
+      } else if (trimmed.startsWith('ord_') || trimmed.startsWith('ord-')) {
+        orderId = trimmed;
+      } else if (trimmed.startsWith('PP') || trimmed.startsWith('ORD-')) {
+        orderNumber = trimmed;
+      }
+    }
+
+    if (!pin && !orderId && !orderNumber) {
       return NextResponse.json(
-        { success: false, error: 'Please enter a valid 4-digit PIN' },
+        { success: false, error: 'Invalid QR Pass. No order identifier found.' },
         { status: 400 }
       );
     }
 
-    const cleanPin = String(pin).trim();
+    const cleanPin = pin ? String(pin).trim() : '';
+    const cleanOrderId = orderId ? String(orderId).trim() : '';
+    const cleanOrderNumber = orderNumber ? String(orderNumber).trim() : '';
+
     let order: any = null;
     let machine: any = null;
 
@@ -29,11 +56,17 @@ export async function POST(req: NextRequest) {
         machine = mData;
       }
 
-      // 2. Fetch Order by 4-digit PIN
-      const { data: oData } = await supabaseAdmin
-        .from('orders')
-        .select('*')
-        .eq('four_digit_pin', cleanPin)
+      // 2. Fetch Order by ID, Order Number, or 4-digit PIN
+      let query = supabaseAdmin.from('orders').select('*');
+      if (cleanOrderId) {
+        query = query.eq('id', cleanOrderId);
+      } else if (cleanOrderNumber) {
+        query = query.eq('order_number', cleanOrderNumber);
+      } else if (cleanPin) {
+        query = query.eq('four_digit_pin', cleanPin);
+      }
+
+      const { data: oData } = await query
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -95,13 +128,21 @@ export async function POST(req: NextRequest) {
     }
 
     if (!order) {
-      const dbOrder = db.getOrderByPin(cleanPin) || db.findAnyOrderByPin(cleanPin);
+      let dbOrder: any = null;
+      if (cleanOrderId) {
+        dbOrder = db.getOrderById(cleanOrderId);
+      } else if (cleanOrderNumber) {
+        dbOrder = db.getOrderById(cleanOrderNumber);
+      } else if (cleanPin) {
+        dbOrder = db.getOrderByPin(cleanPin) || db.findAnyOrderByPin(cleanPin);
+      }
+
       if (dbOrder) {
         if (dbOrder.orderStatus === 'completed') {
           return NextResponse.json(
             { 
               success: false, 
-              error: `Security Alert: PIN #${cleanPin} has already been used and fulfilled. Single-use PINs cannot be reused.` 
+              error: `Security Alert: This print pass has already been used and fulfilled. Single-use passes cannot be reused.` 
             },
             { status: 400 }
           );

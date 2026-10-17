@@ -40,7 +40,8 @@ import {
   ShieldAlert,
   MessageCircle,
   User,
-  KeyRound
+  KeyRound,
+  ScanLine
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { Machine, PricingRule, PrintOrder, ColorMode, DuplexMode } from '@/lib/types';
@@ -3318,118 +3319,39 @@ export default function QwikprintAuthenticApp() {
 
                   {/* Ticket Header with Tab Switcher */}
                   <div className="p-4 sm:p-5 space-y-3.5">
-                    <div className="flex items-center justify-between pb-2.5 border-b border-slate-100">
-                      <div>
-                        <p className="text-sm font-black text-slate-900">
-                          Your Print Code is Ready!
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          Use this QR code or 4-digit PIN at the kiosk within 24 hours.
-                        </p>
+                    <div className="text-center pb-2 border-b border-slate-100">
+                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-black uppercase tracking-wider mb-1">
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Official QR Print Pass</span>
                       </div>
-
-                      {/* Dual Option Toggle Tabs */}
-                      <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            sounds.keyPress();
-                            setActiveCodeTab('qr');
-                          }}
-                          className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                            activeCodeTab === 'qr'
-                              ? 'bg-white text-[#2563eb] shadow-xs border border-slate-200/60'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          <QrCode className="w-3.5 h-3.5" />
-                          <span>QR Code</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            sounds.keyPress();
-                            setActiveCodeTab('pin');
-                          }}
-                          className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                            activeCodeTab === 'pin'
-                              ? 'bg-white text-[#2563eb] shadow-xs border border-slate-200/60'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          <KeyRound className="w-3.5 h-3.5" />
-                          <span>PIN</span>
-                        </button>
-                      </div>
+                      <p className="text-base font-black text-slate-900">
+                        Scan at Kiosk to Release Document
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Hold this QR code in front of the scanner on Terminal {activeOrder.machineName || currentMachine?.displayName || 'RIT-ATM-01'}.
+                      </p>
                     </div>
 
-                    {/* View Option 1: QR CODE */}
-                    {activeCodeTab === 'qr' && (
-                      <div className="py-2 flex flex-col items-center justify-center text-center space-y-2 animate-fade-in">
-                        <div className="p-3 rounded-2xl bg-white border-2 border-slate-200 shadow-sm flex items-center justify-center">
-                          {qrDataUrl ? (
-                            <img
-                              src={qrDataUrl}
-                              alt="Print QR Code"
-                              className="w-44 h-44 sm:w-48 sm:h-48 object-contain rounded-lg"
-                            />
-                          ) : (
-                            <div className="w-44 h-44 flex items-center justify-center">
-                              <RefreshCw className="w-6 h-6 animate-spin text-[#2563eb]" />
-                            </div>
-                          )}
-                        </div>
-                        <p className="text-xs font-semibold text-slate-600">
-                          Hold screen in front of kiosk scanner to auto-release prints.
-                        </p>
+                    {/* QR Code Pass Display */}
+                    <div className="py-2 flex flex-col items-center justify-center text-center space-y-3 animate-fade-in">
+                      <div className="p-4 rounded-3xl bg-white border-2 border-blue-200/80 shadow-lg shadow-blue-500/10 flex items-center justify-center relative group">
+                        {qrDataUrl ? (
+                          <img
+                            src={qrDataUrl}
+                            alt="Print QR Code Pass"
+                            className="w-48 h-48 sm:w-56 sm:h-56 object-contain rounded-xl"
+                          />
+                        ) : (
+                          <div className="w-48 h-48 flex items-center justify-center">
+                            <RefreshCw className="w-6 h-6 animate-spin text-[#2563eb]" />
+                          </div>
+                        )}
                       </div>
-                    )}
-
-                    {/* View Option 2: 4-DIGIT PIN */}
-                    {activeCodeTab === 'pin' && (
-                      <div className="text-center py-2 space-y-2.5 bg-gradient-to-b from-[#f4fcf6] to-white rounded-2xl border border-blue-100/80 p-4 animate-fade-in">
-                        <span className="text-xs font-bold text-slate-600 uppercase tracking-wider block">
-                          Type this 4-Digit PIN on Kiosk Touchscreen
-                        </span>
-
-                        {/* Glowing Digit Boxes */}
-                        <div className="flex items-center justify-center gap-2.5 sm:gap-4 my-1">
-                          {activeOrder.fourDigitPin.split('').map((char, i) => (
-                            <div
-                              key={i}
-                              className="flex h-14 w-12 sm:h-18 sm:w-16 items-center justify-center rounded-2xl bg-white border-2 border-[#2563eb]/50 text-3xl sm:text-4xl font-black text-[#2563eb] font-mono shadow-sm transition-transform hover:scale-105 select-all"
-                            >
-                              <span>{char}</span>
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* Copy PIN button */}
-                        <div className="flex justify-center pt-1">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              sounds.keyPress();
-                              copyPinToClipboard(activeOrder.fourDigitPin);
-                            }}
-                            className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full border border-slate-200 bg-white hover:bg-blue-50 hover:border-blue-300 text-xs font-bold text-slate-700 hover:text-[#2563eb] transition-all cursor-pointer shadow-2xs active:scale-95"
-                          >
-                            {copiedPin ? (
-                              <>
-                                <Check className="h-3.5 w-3.5 text-[#2563eb]" />
-                                <span className="text-[#2563eb]">PIN Copied to Clipboard!</span>
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="h-3.5 w-3.5" />
-                                <span>Tap to Copy PIN</span>
-                              </>
-                            )}
-                          </button>
-                        </div>
+                      <div className="flex items-center gap-2 text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 px-3.5 py-1.5 rounded-full">
+                        <ScanLine className="w-4 h-4 text-blue-600" />
+                        <span>Hold screen 10cm - 15cm from scanner</span>
                       </div>
-                    )}
+                    </div>
 
                     {/* WhatsApp Notification Status Badge */}
                     <div className="rounded-2xl border border-blue-200 bg-blue-50 p-2.5 flex items-center justify-between gap-3">
@@ -3446,7 +3368,7 @@ export default function QwikprintAuthenticApp() {
                       </div>
                       <a
                         href={`https://api.whatsapp.com/send?${(customerPhone || phoneInput) ? `phone=${(customerPhone || phoneInput).replace(/\D/g, '').length === 10 ? '91' + (customerPhone || phoneInput).replace(/\D/g, '') : (customerPhone || phoneInput).replace(/\D/g, '')}&` : ''}text=${encodeURIComponent(
-                          `Hello,\n\nYour SmartPrint order has been successfully created.\n\nOrder PIN: ${activeOrder.fourDigitPin}\n\nUse this PIN at any RIT Campus SmartPrint Kiosk to print your document.`
+                          `Hello,\n\nYour SmartPrint order #${activeOrder.orderNumber} is ready.\n\nScan your Mobile QR Pass at Kiosk ${activeOrder.machineName || 'RIT-ATM-01'} to release your document automatically.`
                         )}`}
                         target="_blank"
                         rel="noopener noreferrer"
@@ -3571,9 +3493,9 @@ export default function QwikprintAuthenticApp() {
                         2
                       </div>
                       <div className="min-w-0">
-                        <p className="font-bold text-xs text-slate-900">Type 4-Digit PIN</p>
+                        <p className="font-bold text-xs text-slate-900">Scan QR Pass</p>
                         <p className="text-[11px] text-slate-500">
-                          Enter <strong className="font-mono text-[#2563eb] font-black">{activeOrder.fourDigitPin}</strong> on the touchscreen.
+                          Hold your mobile screen in front of the kiosk scanner.
                         </p>
                       </div>
                     </div>

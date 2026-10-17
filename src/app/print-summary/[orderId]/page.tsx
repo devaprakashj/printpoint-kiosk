@@ -835,45 +835,18 @@ export default function PrintSummaryPage() {
                   /* STATE B: PAID & AWAITING KIOSK PICKUP (PREMIUM PASS UI) */
                   <div className="rounded-2xl border border-slate-200/90 bg-white p-3 sm:p-3.5 text-slate-900 shadow-xs space-y-2.5 flex-1 flex flex-col justify-between">
                     <div className="space-y-2">
-                      {/* 1. Top Full-Width Segmented Tab Control with Fluid Sliding Indicator */}
-                      <div className="relative p-0.5 rounded-xl bg-slate-100/90 border border-slate-200/80 flex items-center">
-                        {/* Animated sliding background pill */}
-                        <div
-                          className={`absolute top-0.5 bottom-0.5 w-[calc(50%-2px)] rounded-lg bg-white shadow-2xs border border-slate-200/70 transition-all duration-300 ease-out pointer-events-none ${
-                            activeCodeTab === 'qr' ? 'left-0.5' : 'left-[calc(50%+1px)]'
-                          }`}
-                        />
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            sounds.keyPress();
-                            setActiveCodeTab('qr');
-                          }}
-                          className={`relative z-10 flex-1 py-1.5 px-3 text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer select-none ${
-                            activeCodeTab === 'qr' ? 'text-slate-900' : 'text-slate-500 hover:text-slate-800'
-                          }`}
-                        >
-                          <QrCode className="w-3.5 h-3.5 text-[#2563eb]" />
-                          <span className="whitespace-nowrap">QR Code</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            sounds.keyPress();
-                            setActiveCodeTab('pin');
-                          }}
-                          className={`relative z-10 flex-1 py-1.5 px-3 text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer select-none ${
-                            activeCodeTab === 'pin' ? 'text-slate-900' : 'text-slate-500 hover:text-slate-800'
-                          }`}
-                        >
-                          <KeyRound className="w-3.5 h-3.5 text-[#2563eb]" />
-                          <span className="whitespace-nowrap">4-Digit PIN</span>
-                        </button>
+                      {/* 1. Official Digital QR Print Pass Header */}
+                      <div className="text-center pb-1 border-b border-slate-100">
+                        <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[11px] font-black uppercase tracking-wider mb-1">
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>Official QR Print Pass</span>
+                        </div>
+                        <p className="text-xs font-bold text-slate-600">
+                          Hold code to kiosk scanner window
+                        </p>
                       </div>
 
-                      {/* 2. Clean Document Context Strip (Shown on Mobile, hidden on Desktop since Left Column already displays it) */}
+                      {/* 2. Clean Document Context Strip (Shown on Mobile, hidden on Desktop) */}
                       <div className="lg:hidden flex items-center justify-between px-3 py-1.5 rounded-xl bg-slate-50/80 border border-slate-200/70">
                         <div className="min-w-0 flex items-center gap-2">
                           <div className="w-6 h-6 rounded-md bg-blue-100/70 text-[#2563eb] flex items-center justify-center shrink-0">
@@ -894,84 +867,35 @@ export default function PrintSummaryPage() {
                       </div>
 
                       {/* 3. Display Area: QR CODE VIEW */}
-                      {activeCodeTab === 'qr' && (
-                        <div className="py-0.5 flex flex-col items-center justify-center text-center space-y-1.5 animate-fade-in">
-                          {/* Modern Scanner Viewfinder Frame */}
-                          <div className="relative p-2.5 lg:p-2 rounded-2xl bg-white border border-slate-200 shadow-2xs flex items-center justify-center">
-                            {/* Viewfinder Corners */}
-                            <div className="absolute top-1.5 left-1.5 w-3.5 h-3.5 border-t-2 border-l-2 border-[#2563eb] rounded-tl pointer-events-none" />
-                            <div className="absolute top-1.5 right-1.5 w-3.5 h-3.5 border-t-2 border-r-2 border-[#2563eb] rounded-tr pointer-events-none" />
-                            <div className="absolute bottom-1.5 left-1.5 w-3.5 h-3.5 border-b-2 border-l-2 border-[#2563eb] rounded-bl pointer-events-none" />
-                            <div className="absolute bottom-1.5 right-1.5 w-3.5 h-3.5 border-b-2 border-r-2 border-[#2563eb] rounded-br pointer-events-none" />
+                      <div className="py-1 flex flex-col items-center justify-center text-center space-y-2 animate-fade-in">
+                        {/* Modern Scanner Viewfinder Frame */}
+                        <div className="relative p-3 lg:p-2.5 rounded-2xl bg-white border-2 border-blue-200/80 shadow-md shadow-blue-500/10 flex items-center justify-center">
+                          {/* Viewfinder Corners */}
+                          <div className="absolute top-1.5 left-1.5 w-3.5 h-3.5 border-t-2 border-l-2 border-[#2563eb] rounded-tl pointer-events-none" />
+                          <div className="absolute top-1.5 right-1.5 w-3.5 h-3.5 border-t-2 border-r-2 border-[#2563eb] rounded-tr pointer-events-none" />
+                          <div className="absolute bottom-1.5 left-1.5 w-3.5 h-3.5 border-b-2 border-l-2 border-[#2563eb] rounded-bl pointer-events-none" />
+                          <div className="absolute bottom-1.5 right-1.5 w-3.5 h-3.5 border-b-2 border-r-2 border-[#2563eb] rounded-br pointer-events-none" />
 
-                            {qrDataUrl ? (
-                              <img
-                                src={qrDataUrl}
-                                alt="Print QR Code"
-                                className="w-36 h-36 sm:w-40 sm:h-40 lg:w-28 lg:h-28 xl:w-32 xl:h-32 object-contain rounded-md"
-                              />
-                            ) : (
-                              <div className="w-28 h-28 flex items-center justify-center">
-                                <RefreshCw className="w-5 h-5 animate-spin text-[#2563eb]" />
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="space-y-1">
-                            <p className="text-[11px] font-bold text-slate-800 flex items-center justify-center gap-1.5">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                              <span>Hold code to kiosk scanner window</span>
-                            </p>
-                            
-                            {/* Instant PIN fallback shortcut */}
-                            {order.fourDigitPin && (
-                              <button
-                                type="button"
-                                onClick={handleCopyPin}
-                                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-100 hover:bg-slate-200/80 text-[10px] font-bold text-slate-700 transition-colors cursor-pointer"
-                              >
-                                <span>Or enter PIN:</span>
-                                <span className="font-mono font-black text-[#2563eb] tracking-widest">{order.fourDigitPin}</span>
-                                {copiedPin ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3 text-slate-400" />}
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* 4. Display Area: 4-DIGIT PIN VIEW */}
-                      {activeCodeTab === 'pin' && (
-                        <div className="py-1 flex flex-col items-center justify-center text-center space-y-2 animate-fade-in">
-                          <div className="rounded-2xl border border-blue-200/90 bg-gradient-to-b from-blue-50/50 to-blue-50/90 p-3 sm:p-4 w-full max-w-xs mx-auto text-center space-y-2 shadow-2xs">
-                            <span className="text-[9px] font-mono font-bold text-blue-900 uppercase tracking-widest block">
-                              Touchscreen Kiosk Passcode
-                            </span>
-                            <div className="flex items-center justify-center gap-2">
-                              {order.fourDigitPin ? order.fourDigitPin.split('').map((digit: string, i: number) => (
-                                <div
-                                  key={i}
-                                  className="w-10 h-12 rounded-xl bg-white border border-blue-300 text-2xl font-black font-mono text-[#2563eb] flex items-center justify-center shadow-xs"
-                                >
-                                  {digit}
-                                </div>
-                              )) : (
-                                <span className="text-xs font-bold text-slate-400">PIN Generating...</span>
-                              )}
+                          {qrDataUrl ? (
+                            <img
+                              src={qrDataUrl}
+                              alt="Print QR Code"
+                              className="w-40 h-40 sm:w-44 sm:h-44 lg:w-32 lg:h-32 xl:w-36 xl:h-36 object-contain rounded-md"
+                            />
+                          ) : (
+                            <div className="w-32 h-32 flex items-center justify-center">
+                              <RefreshCw className="w-5 h-5 animate-spin text-[#2563eb]" />
                             </div>
-                            <button
-                              type="button"
-                              onClick={handleCopyPin}
-                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-blue-200 text-[11px] font-bold text-blue-900 hover:bg-blue-100/60 shadow-2xs transition-all cursor-pointer active:scale-95"
-                            >
-                              {copiedPin ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3 text-blue-600" />}
-                              <span>{copiedPin ? 'PIN Copied to Clipboard!' : 'Tap to Copy PIN'}</span>
-                            </button>
-                          </div>
-                          <p className="text-[11px] font-medium text-slate-500">
-                            Type this 4-digit code directly onto the kiosk touchscreen.
+                          )}
+                        </div>
+
+                        <div className="space-y-1">
+                          <p className="text-[11px] font-bold text-slate-800 flex items-center justify-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            <span>Hold 10cm - 15cm from scanner</span>
                           </p>
                         </div>
-                      )}
+                      </div>
                     </div>
 
                     {/* Authentically Framed Receipt Pass Section */}
@@ -1270,30 +1194,19 @@ export default function PrintSummaryPage() {
               </div>
 
               {/* Kiosk Pickup Release Pass */}
-              <div className="p-2 rounded-xl bg-slate-50 border border-slate-200 text-center space-y-1">
+              <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-center space-y-1">
                 <div className="flex items-center justify-center gap-3">
                   {qrDataUrl && (
                     <div className="p-1 bg-white rounded-lg border border-slate-200 shadow-2xs shrink-0">
-                      <img src={qrDataUrl} alt="Release QR" className="w-14 h-14 object-contain rounded" />
+                      <img src={qrDataUrl} alt="Release QR" className="w-16 h-16 object-contain rounded" />
                     </div>
                   )}
 
-                  {order.fourDigitPin && (
-                    <div className="space-y-0.5 text-left">
-                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Pickup PIN</span>
-                      <div className="flex gap-1">
-                        {order.fourDigitPin.split('').map((d: string, i: number) => (
-                          <span
-                            key={i}
-                            className="w-6 h-7 rounded-md bg-white border border-blue-300 text-blue-600 font-black font-mono text-sm flex items-center justify-center shadow-2xs"
-                          >
-                            {d}
-                          </span>
-                        ))}
-                      </div>
-                      <p className="text-[8px] text-slate-500 mt-0.5">Scan code or enter PIN at kiosk</p>
-                    </div>
-                  )}
+                  <div className="space-y-0.5 text-left">
+                    <span className="text-[10px] font-bold text-blue-900 uppercase tracking-wider block">Official QR Print Pass</span>
+                    <p className="text-[10px] font-medium text-slate-600">Hold QR code in front of the kiosk scanner</p>
+                    <p className="text-[9px] text-emerald-700 font-bold">Touchless Instant Release ✓</p>
+                  </div>
                 </div>
               </div>
 

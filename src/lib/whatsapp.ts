@@ -19,23 +19,23 @@ export async function sendDirectWhatsAppMessage(params: {
   const cleanPhone = String(phone).replace(/\D/g, '');
   const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
 
-  const messageText = `🖨️ *PrintPoint Cloud ATM — Order Confirmed!*
+  const messageText = `🖨️ *SmartPrint RIT Campus Kiosk — Order Confirmed!*
 
 Hello 👋,
-Your document has been securely uploaded and is ready for instant printing.
+Your document has been securely uploaded and is ready for instant touchless printing.
 
 ━━━━━━━━━━━━━━━━━━━━
-🔑 *YOUR 4-DIGIT PRINT PIN: [ ${pin} ]*
+🎟️ *ORDER NUMBER: #${orderNumber || 'SMARTPRINT'}*
 ━━━━━━━━━━━━━━━━━━━━
 
-📍 *3 Quick Steps to Print:*
-1️⃣ Walk up to any nearest PrintPoint ATM Touchscreen.
-2️⃣ Enter your 4-digit PIN: *${pin}*.
-3️⃣ Collect your high-quality prints instantly! ⚡
+📍 *Quick Steps to Print:*
+1️⃣ Walk up to Kiosk: *${machineName || 'RIT-ATM-01'}*
+2️⃣ Open your order page to display your *Unique QR Print Pass*.
+3️⃣ Hold your phone screen to the kiosk optical scanner — printing begins automatically! ⚡
 
-🔒 *Privacy Protected:* Your file is permanently shredded & wiped from the cloud immediately after printing.
+🔒 *Privacy Protected:* Your file is permanently shredded & wiped immediately after printing.
 
-_Thank you for choosing PrintPoint ATM!_`;
+_Thank you for using SmartPrint Campus ATM!_`;
 
   const directWhatsAppUrl = `https://api.whatsapp.com/send?phone=${formattedPhone}&text=${encodeURIComponent(messageText)}`;
 
