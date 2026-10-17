@@ -557,10 +557,47 @@ def check_is_kiosk_scanner_active(server_url: str, machine_code: str) -> tuple[b
         return True, "active"
 
 
+def set_scanner_hardware_power(enable: bool) -> bool:
+    """Toggles physical 5V USB power to MH-ET LIVE scanner via uhubctl on Raspberry Pi 5."""
+    if platform.system() != "Linux":
+        return True
+    uhubctl_bin = "/usr/sbin/uhubctl" if os.path.exists("/usr/sbin/uhubctl") else "uhubctl"
+    action = "1" if enable else "0"
+    try:
+        cmd = ["sudo", uhubctl_bin, "-l", "1", "-p", "1", "-a", action]
+        res = subprocess.run(cmd, capture_output=True, timeout=4)
+        return res.returncode == 0
+    except Exception:
+        return False
+
+
 def start_hardware_scanner_listener(server_url: str, machine_code: str):
-    """Starts a non-blocking background thread that captures MH-ET LIVE USB HID scanner events directly."""
+    """Starts background threads that manage physical scanner power and capture HID events."""
     if platform.system() != "Linux":
         return
+
+    # Track hardware power state (initial state: start OFF until user clicks 'Scan QR Pass')
+    hardware_power_state = {"powered_on": True}
+
+    def power_supervisor_loop():
+        """Monitors Kiosk screen state every 0.8s and physically cuts/restores USB power."""
+        while True:
+            try:
+                is_active, current_screen = check_is_kiosk_scanner_active(server_url, machine_code)
+                if is_active and not hardware_power_state["powered_on"]:
+                    print(f"\n{GREEN}{BOLD}[HARDWARE SCANNER POWER ON]{RESET} Kiosk entered 'Scan QR Pass' screen. Powering ON MH-ET LIVE scanner!", flush=True)
+                    set_scanner_hardware_power(True)
+                    hardware_power_state["powered_on"] = True
+                elif not is_active and hardware_power_state["powered_on"]:
+                    print(f"\n{YELLOW}[HARDWARE SCANNER POWER OFF]{RESET} Kiosk on '{current_screen}' screen. Cutting USB power to scanner (OFF).", flush=True)
+                    set_scanner_hardware_power(False)
+                    hardware_power_state["powered_on"] = False
+            except Exception:
+                pass
+            time.sleep(0.8)
+
+    p_thread = threading.Thread(target=power_supervisor_loop, daemon=True, name="ScannerPowerSupervisor")
+    p_thread.start()
 
     def listener_loop():
         # Linux EV_KEY decoding table
@@ -585,7 +622,7 @@ def start_hardware_scanner_listener(server_url: str, machine_code: str):
                 glob.glob('/dev/input/by-id/*scanner*')
             )
             if not devs:
-                time.sleep(5)
+                time.sleep(0.5)
                 continue
 
             dev_path = devs[0]
@@ -596,7 +633,11 @@ def start_hardware_scanner_listener(server_url: str, machine_code: str):
                     chars = []
                     is_shift = False
                     while True:
-                        data = f.read(24)
+                        try:
+                            data = f.read(24)
+                        except (OSError, ValueError):
+                            # Device powered down or reconnected by supervisor
+                            break
                         if not data or len(data) < 24:
                             continue
                         sec, usec, ev_type, ev_code, ev_val = struct.unpack('qqHHi', data)
@@ -647,7 +688,7 @@ def start_hardware_scanner_listener(server_url: str, machine_code: str):
                                 elif c:
                                     chars.append(c)
             except Exception:
-                time.sleep(3)
+                time.sleep(0.5)
 
     t = threading.Thread(target=listener_loop, daemon=True, name="HardwareScannerListener")
     t.start()
