@@ -150,12 +150,68 @@ def detect_connected_printers(preferred_printer: str = ""):
     return printers
 
 
+def query_snmp_printer_status(printer_ip: str):
+    """
+    Directly queries network printer IP via SNMP for real hardware paper level,
+    tray status, alerts, and cover status.
+    """
+    if not printer_ip or printer_ip in ["USB", "local"]:
+        return None
+    try:
+        state_out = subprocess.check_output(
+            f"snmpget -v 2c -c public -Oqv {printer_ip} 1.3.6.1.2.1.43.16.5.1.2.1.1 2>/dev/null",
+            shell=True, text=True, timeout=1.5
+        ).strip().strip('"')
+    except Exception:
+        state_out = "Online"
+
+    try:
+        alert_out = subprocess.check_output(
+            f"snmpwalk -v 2c -c public -Oqv {printer_ip} 1.3.6.1.2.1.43.18.1.1.7 2>/dev/null",
+            shell=True, text=True, timeout=1.5
+        ).strip()
+        alert_codes = [int(x) for x in re.findall(r'\d+', alert_out)]
+    except Exception:
+        alert_codes = []
+
+    # Map alerts:
+    # 8, 808, 1108: inputMediaSupplyLow (Paper Low in Cassette)
+    # 5, 502, 1105: inputMediaSupplyEmpty (Paper Empty in Cassette)
+    # 503, 3: coverOpen
+    # 4, 401, 801: paperJam
+    is_paper_low = any(c in (8, 808, 1108) for c in alert_codes)
+    is_paper_empty = any(c in (5, 502, 1105) for c in alert_codes)
+    is_cover_open = any(c in (503, 3) for c in alert_codes)
+    is_jam = any(c in (4, 401, 801) for c in alert_codes)
+
+    return {
+        "state": state_out,
+        "isPaperLow": is_paper_low,
+        "isPaperEmpty": is_paper_empty,
+        "isCoverOpen": is_cover_open,
+        "isJam": is_jam,
+        "alertCodes": alert_codes
+    }
+
+
 def send_heartbeat(server_url: str, machine_code: str, daemon_token: str, preferred_printer: str = ""):
     """Sends telemetry payload to Next.js Cloud Heartbeat endpoint."""
     url = f"{server_url.rstrip('/')}/api/kiosk/heartbeat"
     cpu_temp = get_cpu_temp_celsius()
     ram_usage = get_ram_usage_percent()
     printers = detect_connected_printers(preferred_printer)
+
+    # Query live hardware SNMP telemetry from network printer
+    snmp_data = None
+    for p in printers:
+        port = p.get("port", "")
+        ip_match = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', port)
+        if ip_match:
+            printer_ip = ip_match.group(0)
+            snmp_data = query_snmp_printer_status(printer_ip)
+            if snmp_data:
+                p["snmpHardwareStatus"] = snmp_data
+                break
 
     payload = {
         "machineCode": machine_code,
@@ -167,6 +223,15 @@ def send_heartbeat(server_url: str, machine_code: str, daemon_token: str, prefer
         "osPlatform": f"{platform.system()} {platform.release()}",
         "uptimeSeconds": int(time.time()),
     }
+
+    if snmp_data:
+        payload["printerHardwareState"] = snmp_data.get("state")
+        payload["isDoorOpen"] = snmp_data.get("isCoverOpen", False)
+        if snmp_data.get("isPaperEmpty"):
+            payload["currentSheetsRemaining"] = 0
+            payload["paperStatus"] = "empty"
+        elif snmp_data.get("isPaperLow"):
+            payload["paperStatus"] = "low"
 
     req_data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
