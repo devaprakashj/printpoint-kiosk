@@ -663,26 +663,67 @@ def start_hardware_scanner_listener(server_url: str, machine_code: str):
     set_scanner_hardware_power(True)
 
     def listener_loop():
-        # Linux EV_KEY decoding table
+        # Complete Linux EV_KEY decoding table (Top row + Keypad + Punctuation)
         KEY_MAP = {
             2: '1', 3: '2', 4: '3', 5: '4', 6: '5', 7: '6', 8: '7', 9: '8', 10: '9', 11: '0',
-            28: '\n', 57: ' ',
+            28: '\n', 96: '\n', 15: '\t', 57: ' ',
             16: 'q', 17: 'w', 18: 'e', 19: 'r', 20: 't', 21: 'y', 22: 'u', 23: 'i', 24: 'o', 25: 'p',
             30: 'a', 31: 's', 32: 'd', 33: 'f', 34: 'g', 35: 'h', 36: 'j', 37: 'k', 38: 'l',
             44: 'z', 45: 'x', 46: 'c', 47: 'v', 48: 'b', 49: 'n', 50: 'm',
             52: '.', 53: '/', 12: '-', 13: '=', 26: '[', 27: ']', 39: ';', 40: "'", 43: '\\',
-            51: ',', 14: ''
+            51: ',', 14: '',
+            # Keypad numbers (used by barcode scanners in keypad mode)
+            79: '1', 80: '2', 81: '3', 75: '4', 76: '5', 77: '6', 71: '7', 72: '8', 73: '9', 82: '0',
+            74: '-', 78: '+', 83: '.', 98: '/'
         }
         SHIFT_KEY_MAP = {
             2: '!', 3: '@', 4: '#', 5: '$', 6: '%', 7: '^', 8: '&', 9: '*', 10: '(', 11: ')',
             12: '_', 13: '+', 26: '{', 27: '}', 39: ':', 40: '"', 51: '<', 52: '>', 53: '?'
         }
 
+        import select
+
+        def process_scanned_string(scanned_str: str):
+            scanned_str = scanned_str.strip()
+            if not scanned_str:
+                return
+
+            # Filter 1: Reject 1D linear product barcodes (8-14 pure digits)
+            if re.match(r'^\d{8,14}$', scanned_str):
+                print(f"\n{YELLOW}[1D BARCODE REJECTED] Scanned input '{scanned_str}' is a 1D barcode. Only 2D QR Codes are accepted.{RESET}", flush=True)
+                return
+
+            print(f"\n{GREEN}{BOLD}[QR SCANNED - READY TO SCAN]{RESET} Raw input: {scanned_str[:80]}", flush=True)
+            pin = None
+            order_id = None
+            order_num = None
+
+            if scanned_str.startswith('{'):
+                try:
+                    parsed = json.loads(scanned_str)
+                    pin = parsed.get('pin') or parsed.get('fourDigitPin')
+                    order_id = parsed.get('orderId') or parsed.get('id')
+                    order_num = parsed.get('orderNumber')
+                except Exception:
+                    pass
+
+            if not pin and not order_id:
+                match = re.search(r'\b\d{4}\b', scanned_str)
+                if match:
+                    pin = match.group(0)
+
+            if pin or order_id or order_num:
+                print(f"  {CYAN}[AUTO-TRIGGER]{RESET} Order target: PIN={pin}, OrderID={order_id}. Triggering print release...", flush=True)
+                trigger_pin_release(server_url, machine_code, pin=pin, order_id=order_id, order_number=order_num)
+            else:
+                print(f"  {YELLOW}[SCANNER WARNING] Could not find PIN or Order in: {scanned_str}{RESET}", flush=True)
+
         while True:
             devs = (
                 glob.glob('/dev/input/by-id/*Serial_To_HID*') or
                 glob.glob('/dev/input/by-id/*barcode*') or
-                glob.glob('/dev/input/by-id/*scanner*')
+                glob.glob('/dev/input/by-id/*scanner*') or
+                glob.glob('/dev/input/event1')
             )
             if not devs:
                 time.sleep(1.0)
@@ -696,12 +737,28 @@ def start_hardware_scanner_listener(server_url: str, machine_code: str):
                     chars = []
                     is_shift = False
                     while True:
+                        # Wait up to 150ms for events. If characters arrived and then stopped for 150ms, flush buffer!
+                        r, _, _ = select.select([f], [], [], 0.15)
+                        if not r:
+                            if len(chars) >= 4:
+                                s = "".join(chars)
+                                chars = []
+                                process_scanned_string(s)
+                            continue
+
                         try:
                             data = f.read(24)
                         except (OSError, ValueError):
+                            print(f"  {YELLOW}[HARDWARE SCANNER] Read error, reconnecting...{RESET}", flush=True)
                             break
-                        if not data or len(data) < 24:
+
+                        if not data:
+                            print(f"  {YELLOW}[HARDWARE SCANNER] Device disconnected / EOF, reconnecting...{RESET}", flush=True)
+                            break
+
+                        if len(data) < 24:
                             continue
+
                         sec, usec, ev_type, ev_code, ev_val = struct.unpack('qqHHi', data)
                         if ev_type == 1:  # EV_KEY
                             if ev_code in (42, 54):  # Shift
@@ -714,42 +771,14 @@ def start_hardware_scanner_listener(server_url: str, machine_code: str):
                                 else:
                                     c = KEY_MAP.get(ev_code, '')
 
-                                if c == '\n':
-                                    scanned_str = "".join(chars).strip()
+                                if c in ('\n', '\t'):
+                                    s = "".join(chars)
                                     chars = []
-                                    if scanned_str:
-                                        # Filter 1: Reject 1D linear product barcodes (8-14 pure digits)
-                                        if re.match(r'^\d{8,14}$', scanned_str):
-                                            print(f"\n{YELLOW}[1D BARCODE REJECTED] Scanned input '{scanned_str}' is a 1D barcode. Only 2D QR Codes are accepted.{RESET}", flush=True)
-                                            continue
-
-                                        print(f"\n{GREEN}{BOLD}[QR SCANNED - READY TO SCAN]{RESET} Raw input: {scanned_str[:80]}", flush=True)
-                                        pin = None
-                                        order_id = None
-                                        order_num = None
-
-                                        if scanned_str.startswith('{'):
-                                            try:
-                                                parsed = json.loads(scanned_str)
-                                                pin = parsed.get('pin') or parsed.get('fourDigitPin')
-                                                order_id = parsed.get('orderId') or parsed.get('id')
-                                                order_num = parsed.get('orderNumber')
-                                            except Exception:
-                                                pass
-
-                                        if not pin and not order_id:
-                                            match = re.search(r'\b\d{4}\b', scanned_str)
-                                            if match:
-                                                pin = match.group(0)
-
-                                        if pin or order_id or order_num:
-                                            print(f"  {CYAN}[AUTO-TRIGGER]{RESET} Order target: PIN={pin}, OrderID={order_id}. Triggering print release...", flush=True)
-                                            trigger_pin_release(server_url, machine_code, pin=pin, order_id=order_id, order_number=order_num)
-                                        else:
-                                            print(f"  {YELLOW}[SCANNER WARNING] Could not find PIN or Order in: {scanned_str}{RESET}", flush=True)
+                                    process_scanned_string(s)
                                 elif c:
                                     chars.append(c)
-            except Exception:
+            except Exception as e:
+                print(f"  {YELLOW}[HARDWARE SCANNER] Exception: {e}, retrying in 1s...{RESET}", flush=True)
                 time.sleep(1.0)
 
     t = threading.Thread(target=listener_loop, daemon=True, name="HardwareScannerListener")
