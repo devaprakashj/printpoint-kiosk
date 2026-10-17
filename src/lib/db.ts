@@ -278,6 +278,30 @@ class PrintAtmStore {
     if (!key) return undefined;
     return this.hardwareJobStatus[String(key).trim()];
   }
+
+  setMachineLiveActiveOrder(machineCode: string, order: any): void {
+    if (!machineCode) return;
+    const code = machineCode.toUpperCase();
+    (this.hardwareJobStatus as any)[`LIVE_ACTIVE_${code}`] = {
+      order,
+      updatedAt: Date.now(),
+    };
+  }
+
+  getMachineLiveActiveOrder(machineCode: string): any {
+    if (!machineCode) return null;
+    const code = machineCode.toUpperCase();
+    const entry = (this.hardwareJobStatus as any)[`LIVE_ACTIVE_${code}`];
+    if (!entry) return null;
+    if (Date.now() - entry.updatedAt > 60000) return null;
+    return entry.order;
+  }
+
+  clearMachineLiveActiveOrder(machineCode: string): void {
+    if (!machineCode) return;
+    const code = machineCode.toUpperCase();
+    delete (this.hardwareJobStatus as any)[`LIVE_ACTIVE_${code}`];
+  }
 }
 
 // Global Singleton Instance

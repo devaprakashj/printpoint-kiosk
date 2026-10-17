@@ -173,6 +173,16 @@ export default function AutonomousTouchscreenKiosk() {
     setPrintStep(1);
     setCountdownSeconds(8);
     setAutoPrintCountdown(3);
+    fetch('/api/kiosk/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        machineCode,
+        currentScreen: 'ready_to_scan',
+        isScannerActive: true,
+        clearActiveOrder: true,
+      }),
+    }).catch(() => {});
   };
 
   // Notify server of scanner active state
@@ -278,6 +288,32 @@ export default function AutonomousTouchscreenKiosk() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentScreen, handleScannedQrData]);
+
+  // ── LIVE SERVER-SYNCED SCAN LISTENER (Captures Pi Hardware Scans Instantly) ──
+  const lastProcessedOrderIdRef = useRef<string>('');
+
+  useEffect(() => {
+    if (currentScreen !== 'ready_to_scan') return;
+
+    const syncTimer = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/kiosk/state?machineCode=${machineCode}`, { cache: 'no-store' });
+        const data = await res.json();
+        if (data.success && data.activeOrder && currentScreen === 'ready_to_scan') {
+          const ord = data.activeOrder;
+          if (ord.id && ord.id !== lastProcessedOrderIdRef.current) {
+            lastProcessedOrderIdRef.current = ord.id;
+            playTouchTone(1320, 0.25);
+            setActiveOrder(ord);
+            setCurrentScreen('order_details');
+            setAutoPrintCountdown(3);
+          }
+        }
+      } catch {}
+    }, 1000);
+
+    return () => clearInterval(syncTimer);
+  }, [currentScreen, machineCode]);
 
   // ── TRIGGER REAL PRINTING SEQUENCE (SYNCHRONIZED WITH CUPS) ──
   const startPrintingSequence = async () => {
@@ -620,9 +656,9 @@ export default function AutonomousTouchscreenKiosk() {
                       {activeOrder.fileName || 'Document.pdf'}
                     </span>
                     <div className="text-slate-500 space-y-0.5 pt-0.5 text-[11px]">
-                      <div>Pages: <b className="text-slate-800">{activeOrder.calculatedPrintPages || 1}</b></div>
+                      <div>Pages: <b className="text-slate-800">{activeOrder.calculatedPrintPages || activeOrder.pages || 1}</b></div>
                       <div>Copies: <b className="text-slate-800">{activeOrder.copies || 1}</b></div>
-                      <div>Type: <b className="text-blue-600 uppercase">{activeOrder.colorMode === 'color' ? 'Color' : 'Black & White'} ({activeOrder.duplexMode === 'double' ? 'Duplex' : 'Single Sided'})</b></div>
+                      <div>Type: <b className="text-blue-600 uppercase">{(activeOrder.colorMode === 'color' ? 'Color' : 'Black & White')} ({(activeOrder.duplexMode === 'double' || activeOrder.duplexMode === 'duplex') ? 'Duplex' : 'Single Sided'})</b></div>
                     </div>
                   </div>
                 </div>

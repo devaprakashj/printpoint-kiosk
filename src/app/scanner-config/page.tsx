@@ -32,6 +32,18 @@ const STEPS: ConfigStep[] = [
   },
   {
     step: 2,
+    id: 'induction_mode',
+    title: 'Enable Auto-Sensing Mode (Hands-Free)',
+    subtitle: 'System Working Mode: Induction / Auto-Sense',
+    code: '~M00210002.',
+    image: '/v3_induction_mode.png',
+    badge: 'HANDS-FREE AUTO SCAN',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    instruction: 'Scanner will automatically detect mobile phone screens and QR codes hands-free without pressing any button!',
+    tamilInstruction: 'இதை ஸ்கேன் செய்தால் ஸ்கேனர் ஆட்டோ-சென்சிங் மோடுக்கு மாறும். பட்டன் அழுத்தாமல் போனை காட்டினால் உடனே ஸ்கேன் செய்யும்!'
+  },
+  {
+    step: 3,
     id: 'white_off',
     title: 'Turn OFF White Floodlight',
     subtitle: 'Fill Light Continuous: Level 0 (0% OFF)',
@@ -43,7 +55,7 @@ const STEPS: ConfigStep[] = [
     tamilInstruction: 'இதை ஸ்கேன் செய்த உடனேயே வெள்ளை நிற எல்.இ.டி லைட் அணைந்துவிடும்!'
   },
   {
-    step: 3,
+    step: 4,
     id: 'red_off',
     title: 'Turn OFF Red Laser',
     subtitle: 'Aiming Light: Shut Down',
@@ -55,7 +67,7 @@ const STEPS: ConfigStep[] = [
     tamilInstruction: 'இதை ஸ்கேன் செய்தால் சிவப்பு நிற லேசர் கோடும் அணைந்துவிடும்.'
   },
   {
-    step: 4,
+    step: 5,
     id: 'disable_1d',
     title: 'Disable 1D Barcodes (QR ONLY)',
     subtitle: 'All 1D Code: CLOSE | 2D QR: OPEN',
@@ -67,7 +79,7 @@ const STEPS: ConfigStep[] = [
     tamilInstruction: 'இதை ஸ்கேன் செய்தால் பார்கோடுகள் ஸ்கேன் ஆகாது, Beep சத்தம் வராது. QR Code மட்டுமே ஸ்கேன் ஆகும்!'
   },
   {
-    step: 5,
+    step: 6,
     id: 'save',
     title: 'Save to Memory',
     subtitle: 'Save User Defaults to Flash EEPROM',
@@ -79,7 +91,7 @@ const STEPS: ConfigStep[] = [
     tamilInstruction: 'இதை ஸ்கேன் செய்தால் எல்லா செட்டிங்ஸ்களும் நிரந்தரமாக ஸ்கேனரின் மெமரியில் சேவ் ஆகிவிடும்!'
   },
   {
-    step: 6,
+    step: 7,
     id: 'lock',
     title: 'Exit & Lock Config',
     subtitle: 'Scan Code Configuration: OFF',

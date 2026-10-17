@@ -115,6 +115,23 @@ export async function POST(req: NextRequest) {
     if (jobPayload.orderNumber) db.setHardwareJobStatus(jobPayload.orderNumber, 'spooling', 'Dispatched to CUPS print daemon');
     if (pin) db.setHardwareJobStatus(String(pin).trim(), 'spooling', 'Dispatched to CUPS print daemon');
 
+    // Notify live kiosk UI screen of the scanned active order
+    db.setMachineLiveActiveOrder(targetMachine, {
+      id: finalOrder?.id || jobPayload.orderId,
+      orderNumber: jobPayload.orderNumber,
+      fileName: jobPayload.fileName,
+      pages: jobPayload.pages,
+      sheets: jobPayload.sheets,
+      copies: jobPayload.copies,
+      colorMode: jobPayload.colorMode,
+      duplexMode: jobPayload.duplexMode,
+      paperSize: jobPayload.paperSize,
+      fourDigitPin: pin || finalOrder?.fourDigitPin || finalOrder?.four_digit_pin,
+      totalAmountPaise: finalOrder?.totalAmountPaise || finalOrder?.total_amount_paise || (jobPayload.sheets * 200),
+      orderStatus: 'printing',
+      releasedAt: completedAt,
+    });
+
     return NextResponse.json({
       success: true,
       message: 'Print job dispatched to CUPS hardware spooler. Printing in progress.',
