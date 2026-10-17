@@ -21,6 +21,9 @@ import subprocess
 import urllib.request
 import urllib.error
 import re
+import glob
+import struct
+import threading
 
 # Force line-buffering and UTF-8 with errors='replace' so emoji never crashes Windows cp1252 consoles
 if hasattr(sys.stdout, "reconfigure"):
@@ -520,6 +523,112 @@ def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_p
     return True, f"Dispatched to [{printer_name}]"
 
 
+def trigger_pin_release(server_url: str, machine_code: str, pin: str):
+    """Calls Next.js API /api/pin/release to verify and release the order into the print queue."""
+    url = f"{server_url.rstrip('/')}/api/pin/release"
+    payload = {"pin": str(pin).strip(), "machineCode": machine_code}
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": "SmartPrint-Pi5-Scanner/2.4"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("success"):
+                print(f"\n{GREEN}{BOLD}[SCANNER SUCCESS] Order released for PIN {pin}! Printing will commence on next pulse...{RESET}", flush=True)
+            else:
+                print(f"\n{YELLOW}[SCANNER NOTICE] PIN {pin} verify returned: {data.get('error', 'unknown error')}{RESET}", flush=True)
+    except Exception as e:
+        print(f"\n{RED}[SCANNER ERROR] Failed to release PIN {pin}: {e}{RESET}", flush=True)
+
+
+def start_hardware_scanner_listener(server_url: str, machine_code: str):
+    """Starts a non-blocking background thread that captures MH-ET LIVE USB HID scanner events directly."""
+    if platform.system() != "Linux":
+        return
+
+    def listener_loop():
+        # Linux EV_KEY decoding table
+        KEY_MAP = {
+            2: '1', 3: '2', 4: '3', 5: '4', 6: '5', 7: '6', 8: '7', 9: '8', 10: '9', 11: '0',
+            28: '\n', 57: ' ',
+            16: 'q', 17: 'w', 18: 'e', 19: 'r', 20: 't', 21: 'y', 22: 'u', 23: 'i', 24: 'o', 25: 'p',
+            30: 'a', 31: 's', 32: 'd', 33: 'f', 34: 'g', 35: 'h', 36: 'j', 37: 'k', 38: 'l',
+            44: 'z', 45: 'x', 46: 'c', 47: 'v', 48: 'b', 49: 'n', 50: 'm',
+            52: '.', 53: '/', 12: '-', 13: '=', 26: '[', 27: ']', 39: ';', 40: "'", 43: '\\',
+            51: ',', 14: ''
+        }
+        SHIFT_KEY_MAP = {
+            2: '!', 3: '@', 4: '#', 5: '$', 6: '%', 7: '^', 8: '&', 9: '*', 10: '(', 11: ')',
+            12: '_', 13: '+', 26: '{', 27: '}', 39: ':', 40: '"', 51: '<', 52: '>', 53: '?'
+        }
+
+        while True:
+            devs = (
+                glob.glob('/dev/input/by-id/*Serial_To_HID*') or
+                glob.glob('/dev/input/by-id/*barcode*') or
+                glob.glob('/dev/input/by-id/*scanner*')
+            )
+            if not devs:
+                time.sleep(5)
+                continue
+
+            dev_path = devs[0]
+            print(f"  {CYAN}[HARDWARE SCANNER]{RESET} Listening on {os.path.basename(dev_path)}...", flush=True)
+
+            try:
+                with open(dev_path, 'rb') as f:
+                    chars = []
+                    is_shift = False
+                    while True:
+                        data = f.read(24)
+                        if not data or len(data) < 24:
+                            continue
+                        sec, usec, ev_type, ev_code, ev_val = struct.unpack('qqHHi', data)
+                        if ev_type == 1:  # EV_KEY
+                            if ev_code in (42, 54):  # Shift
+                                is_shift = (ev_val != 0)
+                            elif ev_val == 1:  # Key Down
+                                if is_shift and ev_code in SHIFT_KEY_MAP:
+                                    c = SHIFT_KEY_MAP[ev_code]
+                                elif is_shift and ev_code in KEY_MAP:
+                                    c = KEY_MAP[ev_code].upper()
+                                else:
+                                    c = KEY_MAP.get(ev_code, '')
+
+                                if c == '\n':
+                                    scanned_str = "".join(chars).strip()
+                                    chars = []
+                                    if scanned_str:
+                                        print(f"\n{GREEN}{BOLD}[QR SCANNED]{RESET} Raw input: {scanned_str[:80]}", flush=True)
+                                        pin = None
+                                        if scanned_str.startswith('{'):
+                                            try:
+                                                parsed = json.loads(scanned_str)
+                                                pin = parsed.get('pin') or parsed.get('fourDigitPin')
+                                            except Exception:
+                                                pass
+                                        if not pin:
+                                            match = re.search(r'\b\d{4}\b', scanned_str)
+                                            if match:
+                                                pin = match.group(0)
+
+                                        if pin:
+                                            print(f"  {CYAN}[AUTO-TRIGGER]{RESET} Extracted PIN: {BOLD}{pin}{RESET}. Triggering print release...", flush=True)
+                                            trigger_pin_release(server_url, machine_code, pin)
+                                        else:
+                                            print(f"  {YELLOW}[SCANNER WARNING] Could not find 4-digit PIN in: {scanned_str}{RESET}", flush=True)
+                                elif c:
+                                    chars.append(c)
+            except Exception:
+                time.sleep(3)
+
+    t = threading.Thread(target=listener_loop, daemon=True, name="HardwareScannerListener")
+    t.start()
+
+
 def main():
     parser = argparse.ArgumentParser(description="SmartPrint Kiosk Raspberry Pi 5 Daemon")
     parser.add_argument("--machine", "-m", default="RIT-ATM-01", help="Target Machine Code (e.g. RIT-ATM-01)")
@@ -533,6 +642,9 @@ def main():
 
     print_banner(args.machine, args.server)
     print(f"{YELLOW}Initiating telemetry loop... Press Ctrl+C at any time to stop (simulating Power Off){RESET}\n", flush=True)
+
+    # Start non-blocking hardware QR/Barcode scanner listener
+    start_hardware_scanner_listener(args.server, args.machine)
 
     pulse_count = 0
 
