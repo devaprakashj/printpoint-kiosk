@@ -12,7 +12,7 @@ const kioskScreenStates: Record<
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { machineCode, currentScreen, isScannerActive, clearActiveOrder } = body;
+    const { machineCode, currentScreen, isScannerActive, clearActiveOrder, clearScanAlert } = body;
 
     if (!machineCode) {
       return NextResponse.json({ success: false, error: 'machineCode is required' }, { status: 400 });
@@ -23,6 +23,9 @@ export async function POST(req: NextRequest) {
 
     if (clearActiveOrder) {
       db.clearMachineLiveActiveOrder(cleanCode);
+    }
+    if (clearScanAlert) {
+      db.clearMachineLiveScanAlert(cleanCode);
     }
 
     kioskScreenStates[cleanCode] = {
@@ -51,6 +54,7 @@ export async function GET(req: NextRequest) {
 
     const state = kioskScreenStates[cleanCode];
     const liveActiveOrder = db.getMachineLiveActiveOrder(cleanCode) || null;
+    const scanAlert = db.getMachineLiveScanAlert(cleanCode) || null;
 
     // Default to active ready_to_scan for autonomous kiosk
     if (!state || Date.now() - state.updatedAt > 180000) {
@@ -60,6 +64,7 @@ export async function GET(req: NextRequest) {
         currentScreen: 'ready_to_scan',
         isScannerActive: true,
         activeOrder: liveActiveOrder,
+        scanAlert: scanAlert,
         isStale: true,
       });
     }
@@ -70,6 +75,7 @@ export async function GET(req: NextRequest) {
       currentScreen: state.currentScreen,
       isScannerActive: state.isScannerActive,
       activeOrder: liveActiveOrder,
+      scanAlert: scanAlert,
       ageSeconds: Math.round((Date.now() - state.updatedAt) / 1000),
     });
   } catch (err: unknown) {

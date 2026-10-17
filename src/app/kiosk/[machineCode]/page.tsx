@@ -26,6 +26,7 @@ import {
   CheckCircle,
   Radio,
   XCircle,
+  AlertTriangle,
 } from 'lucide-react';
 
 // Streamlined Autonomous Kiosk Navigation Screens
@@ -65,6 +66,15 @@ export default function AutonomousTouchscreenKiosk() {
 
   // Audio accessibility state
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+
+  // Security Alert for Already Scanned / Expired Passes
+  const [scanAlert, setScanAlert] = useState<{
+    type: string;
+    orderNumber?: string;
+    fileName?: string;
+    message: string;
+    tamilMessage?: string;
+  } | null>(null);
 
   // USB Barcode Scanner hardware buffer
   const barcodeBufferRef = useRef<string>('');
@@ -167,6 +177,7 @@ export default function AutonomousTouchscreenKiosk() {
     if (autoPrintTimerRef.current) clearInterval(autoPrintTimerRef.current);
     setCurrentScreen('ready_to_scan');
     setActiveOrder(null);
+    setScanAlert(null);
     setScanError(null);
     setIsVerifyingOrder(false);
     setPrintProgress(0);
@@ -181,6 +192,7 @@ export default function AutonomousTouchscreenKiosk() {
         currentScreen: 'ready_to_scan',
         isScannerActive: true,
         clearActiveOrder: true,
+        clearScanAlert: true,
       }),
     }).catch(() => {});
   };
@@ -234,6 +246,18 @@ export default function AutonomousTouchscreenKiosk() {
 
       if (!data.success) {
         setIsVerifyingOrder(false);
+        if (data.alreadyUsed || data.error?.includes('already been used') || data.error?.includes('already been printed') || data.error?.includes('fulfilled')) {
+          setScanAlert({
+            type: 'ALREADY_USED',
+            orderNumber: data.order?.order_number || data.order?.orderNumber,
+            fileName: data.order?.file_name || data.order?.fileName,
+            message: data.error,
+            tamilMessage: 'இந்த QR பாஸ் ஏற்கனவே பிரிண்ட் செய்யப்பட்டு விட்டது! மறுமுறை பயன்படுத்த முடியாது.',
+          });
+          playTouchTone(220, 0.4);
+          setTimeout(() => setScanAlert(null), 7000);
+          return;
+        }
         setScanError(data.error || 'Invalid QR Pass. Please check your mobile receipt.');
         playTouchTone(220, 0.3);
         return;
@@ -243,6 +267,7 @@ export default function AutonomousTouchscreenKiosk() {
       setActiveOrder(data.order);
       setIsVerifyingOrder(false);
       setScanError(null);
+      setScanAlert(null);
       setCurrentScreen('order_details');
       playTouchTone(1320, 0.25);
 
@@ -299,11 +324,28 @@ export default function AutonomousTouchscreenKiosk() {
       try {
         const res = await fetch(`/api/kiosk/state?machineCode=${machineCode}`, { cache: 'no-store' });
         const data = await res.json();
+
+        // 1. Check for Already-Used / Security Scan Alert from Pi hardware scan
+        if (data.success && data.scanAlert && currentScreen === 'ready_to_scan') {
+          playTouchTone(220, 0.4);
+          setScanAlert(data.scanAlert);
+          setTimeout(() => {
+            setScanAlert(null);
+            fetch('/api/kiosk/state', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ machineCode, clearScanAlert: true }),
+            }).catch(() => {});
+          }, 7000);
+        }
+
+        // 2. Check for active valid order release
         if (data.success && data.activeOrder && currentScreen === 'ready_to_scan') {
           const ord = data.activeOrder;
           if (ord.id && ord.id !== lastProcessedOrderIdRef.current) {
             lastProcessedOrderIdRef.current = ord.id;
             playTouchTone(1320, 0.25);
+            setScanAlert(null);
             setActiveOrder(ord);
             setCurrentScreen('order_details');
             setAutoPrintCountdown(3);
@@ -580,8 +622,44 @@ export default function AutonomousTouchscreenKiosk() {
                 </span>
               </div>
 
+              {/* Security Alert: Already Used / Printed Pass */}
+              {scanAlert && (
+                <div className="w-full max-w-lg p-4 sm:p-5 rounded-3xl bg-rose-50 border-2 border-rose-300 shadow-xl shadow-rose-500/10 flex flex-col items-center text-center space-y-2 animate-in zoom-in-95 duration-150 z-30">
+                  <div className="w-12 h-12 rounded-2xl bg-rose-100 flex items-center justify-center text-rose-600 shadow-xs">
+                    <AlertTriangle className="h-6 w-6 text-rose-600 animate-pulse" />
+                  </div>
+                  <h3 className="text-base sm:text-lg font-black text-rose-950 tracking-tight">
+                    QR பாஸ் ஏற்கனவே பயன்படுத்தப்பட்டுவிட்டது!
+                  </h3>
+                  <div className="text-xs font-bold text-rose-700 flex items-center gap-1.5 flex-wrap justify-center">
+                    {scanAlert.orderNumber && (
+                      <span className="font-mono bg-rose-200/80 px-2.5 py-0.5 rounded-lg border border-rose-300 text-rose-900">
+                        #{scanAlert.orderNumber}
+                      </span>
+                    )}
+                    {scanAlert.fileName && (
+                      <span className="text-rose-800 truncate max-w-[220px]">
+                        &bull; {scanAlert.fileName}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs font-semibold text-rose-700 leading-snug">
+                    {scanAlert.tamilMessage || 'இந்த QR பாஸ் ஏற்கனவே பிரிண்ட் செய்யப்பட்டு விட்டது! மறுமுறை பயன்படுத்த முடியாது.'}
+                  </p>
+                  <div className="text-[10px] font-mono text-rose-500 border-t border-rose-200 pt-1.5 w-full flex items-center justify-between px-2">
+                    <span>Already Printed &bull; Single-use Pass Only</span>
+                    <button
+                      onClick={() => setScanAlert(null)}
+                      className="font-bold underline hover:text-rose-800 cursor-pointer"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Error Alert if any */}
-              {scanError && (
+              {scanError && !scanAlert && (
                 <div className="w-full max-w-md p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center justify-center gap-2 animate-in fade-in">
                   <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
                   <span>{scanError}</span>

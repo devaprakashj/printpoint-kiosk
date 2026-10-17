@@ -28,8 +28,32 @@ export async function POST(req: NextRequest) {
       const { data: oData } = await query.order('created_at', { ascending: false }).limit(1).maybeSingle();
 
       if (oData) {
+        targetMachineCode = machineCode || oData.machine_code || 'RIT-ATM-01';
+
+        // Check if this QR Pass / PIN has already been used and fulfilled
+        if (oData.order_status === 'completed') {
+          const alertData = {
+            type: 'ALREADY_USED',
+            orderNumber: oData.order_number || `ORD-${oData.id.slice(0, 8)}`,
+            fileName: oData.file_name || 'Document.pdf',
+            completedAt: oData.pin_used_at || oData.updated_at,
+            message: 'This QR Pass has already been used and printed! Single-use passes cannot be reused.',
+            tamilMessage: 'இந்த QR பாஸ் ஏற்கனவே பிரிண்ட் செய்யப்பட்டு விட்டது! மறுமுறை பயன்படுத்த முடியாது.',
+          };
+          db.setMachineLiveScanAlert(targetMachineCode, alertData);
+
+          return NextResponse.json(
+            {
+              success: false,
+              alreadyUsed: true,
+              error: `Security Alert: Order #${oData.order_number} has already been printed. Single-use passes cannot be reused.`,
+              order: oData,
+            },
+            { status: 400 }
+          );
+        }
+
         order = oData;
-        targetMachineCode = machineCode || oData.machine_code;
 
         // Set PIN as active/printing and used (Do not shred storage file yet; file is shredded upon hardware job-ack confirmation)
         await supabaseAdmin
