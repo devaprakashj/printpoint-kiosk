@@ -337,6 +337,49 @@ def download_job_file(server_url: str, download_url: str, order_number: str, fil
     Only creates a placeholder slip if NO download_url was ever provided (test/dummy jobs).
     """
     cache_dir = "/tmp/smartprint_spool" if platform.system() == "Linux" else os.path.join(os.path.dirname(os.path.abspath(__file__)), "spool_cache")
+def make_blank_pdf(num_pages: int, out_path: str) -> tuple[str, int]:
+    """Generates a 100% valid standard A4 PDF containing `num_pages` blank pages in pure bytes."""
+    num_pages = max(1, int(num_pages))
+    page_obj_ids = [3 + i for i in range(num_pages)]
+    kids_str = ' '.join(f'{pid} 0 R' for pid in page_obj_ids)
+
+    obj1 = b'1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n'
+    obj2 = f'2 0 obj\n<< /Type /Pages /Kids [{kids_str}] /Count {num_pages} >>\nendobj\n'.encode('ascii')
+
+    page_objs = []
+    for pid in page_obj_ids:
+        p_str = f'{pid} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources <<>> >>\nendobj\n'
+        page_objs.append(p_str.encode('ascii'))
+
+    all_objs = [obj1, obj2] + page_objs
+    header = b'%PDF-1.4\n'
+    body = b''
+    xref = [0]
+    offset = len(header)
+    for obj in all_objs:
+        xref.append(offset)
+        body += obj
+        offset += len(obj)
+
+    xref_offset = len(header) + len(body)
+    xref_str = f'xref\n0 {len(xref)}\n0000000000 65535 f \n'
+    for off in xref[1:]:
+        xref_str += f'{off:010d} 00000 n \n'
+    xref_bytes = xref_str.encode('ascii')
+    trailer = f'trailer\n<< /Size {len(xref)} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n'.encode('ascii')
+
+    with open(out_path, 'wb') as f:
+        f.write(header + body + xref_bytes + trailer)
+    try:
+        os.chmod(out_path, 0o666)
+    except Exception:
+        pass
+    return out_path, os.path.getsize(out_path)
+
+
+def download_job_file(server_url: str, download_url: str, order_number: str, file_name: str, pages_count: int = 1) -> tuple[str, int]:
+    """Downloads remote job file into local temp spool or generates clean blank PDF for blank sheet orders."""
+    cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache", "spool")
     os.makedirs(cache_dir, exist_ok=True)
     try:
         os.chmod(cache_dir, 0o777)
@@ -345,6 +388,7 @@ def download_job_file(server_url: str, download_url: str, order_number: str, fil
 
     clean_name = "".join(c for c in file_name if c.isalnum() or c in "._- ") or "document.pdf"
     local_path = os.path.join(cache_dir, f"{order_number}_{clean_name}")
+    is_blank_order = ('blank' in file_name.lower()) or ('blank' in str(order_number).lower())
 
     if download_url:
         full_url = download_url if download_url.startswith("http") else f"{server_url.rstrip('/')}{download_url}"
@@ -356,6 +400,9 @@ def download_job_file(server_url: str, download_url: str, order_number: str, fil
                 content_type = resp.headers.get('Content-Type', 'application/octet-stream')
                 data = resp.read()
                 if len(data) < 10:
+                    if is_blank_order:
+                        print(f"  {CYAN}[BLANK DISPENSER] Server returned empty blank stub. Generating {pages_count} clean blank A4 pages locally...{RESET}", flush=True)
+                        return make_blank_pdf(pages_count, local_path)
                     raise RuntimeError(f"Download returned suspiciously small file ({len(data)} bytes). Aborting to avoid printing garbage.")
                 with open(local_path, "wb") as f:
                     f.write(data)
@@ -371,16 +418,17 @@ def download_job_file(server_url: str, download_url: str, order_number: str, fil
                 except Exception:
                     pass
                 return final_path, len(data)
-        except urllib.error.HTTPError as http_err:
-            raise RuntimeError(f"Download HTTP error {http_err.code} for order {order_number}: {http_err.reason}. Check if the signed URL is still valid.")
-        except urllib.error.URLError as url_err:
-            raise RuntimeError(f"Download network error for order {order_number}: {url_err.reason}")
-        except RuntimeError:
-            raise
         except Exception as dl_err:
+            if is_blank_order:
+                print(f"  {CYAN}[BLANK DISPENSER] Download notice ({dl_err}). Generating {pages_count} clean blank A4 pages locally...{RESET}", flush=True)
+                return make_blank_pdf(pages_count, local_path)
             raise RuntimeError(f"Download failed for order {order_number} from {full_url[:80]}: {dl_err}")
 
-    # Only fallback to placeholder if NO download_url was provided at all (test/alignment jobs)
+    # Fallback if NO download_url provided
+    if is_blank_order:
+        print(f"  {CYAN}[BLANK DISPENSER] Generating {pages_count} clean blank A4 pages for {order_number}...{RESET}", flush=True)
+        return make_blank_pdf(pages_count, local_path)
+
     print(f"  {YELLOW}[INFO] No download URL provided — generating test alignment slip for {order_number}{RESET}", flush=True)
     sample_content = (
         f"================================================================\r\n"
@@ -998,9 +1046,12 @@ def main():
                     print(f"  {BOLD}Print Mode:{RESET}     {job.get('colorMode', 'bw').upper()} (Duplex: {job.get('duplexMode', 'single').upper()})", flush=True)
                     print(f"  {BOLD}PIN Verified:{RESET}   {pin_code}", flush=True)
 
+                    pages_count = max(1, int(job.get("pages") or job.get("sheets") or 1))
+                    is_blank_order = ('blank' in file_name.lower()) or ('blank' in str(order_num).lower())
+
                     # 1. Download file to secure local memory spool
                     try:
-                        local_file, file_bytes = download_job_file(args.server, download_url, order_num, file_name)
+                        local_file, file_bytes = download_job_file(args.server, download_url, order_num, file_name, pages_count=pages_count)
                         print(f"  {BOLD}File Download:{RESET}  {GREEN}[OK] {file_bytes:,} bytes → {os.path.basename(local_file)}{RESET}", flush=True)
                     except RuntimeError as dl_fatal:
                         print(f"  {RED}[FATAL] Download failed: {dl_fatal}{RESET}", flush=True)
@@ -1011,10 +1062,18 @@ def main():
                     # 2. Spool to Target Printer with real hardware presence indicator
                     cable_status = f"{GREEN}[PHYSICALLY CONNECTED - {chosen_port}]{RESET}" if is_physically_online else f"{RED}[USB CABLE UNPLUGGED - Offline]{RESET}"
                     print(f"  {BOLD}Printer Target:{RESET}{YELLOW}{chosen_printer}{RESET} {cable_status}", flush=True)
-                    raw_duplex = str(job.get("duplexMode") or job.get("duplex_mode") or "").strip().lower()
-                    is_duplex = bool(raw_duplex in ["duplex", "double", "two-sided", "both", "duplexnotumble"])
-                    copies_count = max(1, int(job.get("copies") or 1))
-                    page_ranges = str(job.get("pageRanges") or job.get("page_ranges") or job.get("selected_page_ranges") or "all").strip()
+
+                    if is_blank_order:
+                        is_duplex = False  # Simplex: Every blank sheet must be an individual physical paper
+                        page_ranges = "all"
+                        copies_count = 1
+                        print(f"  {CYAN}[BLANK A4 DISPENSER]{RESET} Dispensing {pages_count} clean blank A4 sheet(s) directly from paper tray...", flush=True)
+                    else:
+                        raw_duplex = str(job.get("duplexMode") or job.get("duplex_mode") or "").strip().lower()
+                        is_duplex = bool(raw_duplex in ["duplex", "double", "two-sided", "both", "duplexnotumble"])
+                        copies_count = max(1, int(job.get("copies") or 1))
+                        page_ranges = str(job.get("pageRanges") or job.get("page_ranges") or job.get("selected_page_ranges") or "all").strip()
+
                     spool_ok, spool_msg = dispatch_to_printer(local_file, chosen_printer, args.print_real, is_physically_online, is_test_print=is_test_print, is_duplex=is_duplex, copies=copies_count, page_ranges=page_ranges)
                     time.sleep(0.5)
                     spool_color = GREEN if spool_ok else RED

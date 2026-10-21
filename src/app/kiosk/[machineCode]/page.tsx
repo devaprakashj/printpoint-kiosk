@@ -599,16 +599,6 @@ export default function AutonomousTouchscreenKiosk() {
     return () => clearInterval(countTimer);
   }, [currentScreen]);
 
-  // Demo pass test helper for easy testing without physical scanner
-  const handleSimulateQuickScan = () => {
-    handleScannedQrData(JSON.stringify({
-      orderId: 'ord_demo_test',
-      orderNumber: 'PP1025',
-      pin: '4829',
-      fileName: 'Campus_Notes_Unit_3.pdf',
-    }));
-  };
-
   return (
     <div className="h-screen max-h-screen w-full bg-[#f8fafc] bg-futuristic-grid text-slate-900 font-sans antialiased select-none flex flex-col justify-between overflow-hidden relative">
       
@@ -819,19 +809,12 @@ export default function AutonomousTouchscreenKiosk() {
                 </div>
               </div>
 
-              {/* Discreet Demo Helper */}
-              <div className="w-full pt-1 flex items-center justify-between text-[10px] text-slate-400 border-t border-slate-100">
+              {/* Printer Hardware Status */}
+              <div className="w-full pt-1 flex items-center justify-center text-[10px] text-slate-400 border-t border-slate-100">
                 <div className="flex items-center gap-1.5">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                   <span>Kyocera MFP Ready (Duplex A4)</span>
                 </div>
-                <button
-                  onClick={handleSimulateQuickScan}
-                  className="text-[9px] font-mono text-slate-400 hover:text-blue-600 underline cursor-pointer"
-                  title="Simulate scanning a demo pass"
-                >
-                  Test Demo Pass &rarr;
-                </button>
               </div>
 
             </div>

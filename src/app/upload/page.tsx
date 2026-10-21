@@ -67,6 +67,38 @@ interface UploadedDocument {
   customRangeInput?: string;
 }
 
+/**
+ * Generates a valid standard A4 PDF containing `numPages` blank pages in pure bytes without external dependencies.
+ */
+function createBlankPdfBlob(numPages: number): Blob {
+  const count = Math.max(1, Math.min(500, Math.floor(Number(numPages) || 1)));
+  const pageObjIds = Array.from({ length: count }, (_, i) => 3 + i);
+  const kidsStr = pageObjIds.map((id) => `${id} 0 R`).join(' ');
+  const obj1 = '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n';
+  const obj2 = `2 0 obj\n<< /Type /Pages /Kids [${kidsStr}] /Count ${count} >>\nendobj\n`;
+  const pageObjs = pageObjIds.map(
+    (id) => `${id} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources <<>> >>\nendobj\n`
+  );
+  const allObjs = [obj1, obj2, ...pageObjs];
+  let body = '';
+  const xref = [0];
+  const header = '%PDF-1.4\n';
+  let offset = header.length;
+  for (const obj of allObjs) {
+    xref.push(offset);
+    body += obj;
+    offset += obj.length;
+  }
+  const xrefOffset = header.length + body.length;
+  let xrefStr = `xref\n0 ${xref.length}\n0000000000 65535 f \n`;
+  for (let i = 1; i < xref.length; i++) {
+    xrefStr += `${String(xref[i]).padStart(10, '0')} 00000 n \n`;
+  }
+  const trailer = `trailer\n<< /Size ${xref.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  const pdfString = header + body + xrefStr + trailer;
+  return new Blob([pdfString], { type: 'application/pdf' });
+}
+
 export default function QwikprintAuthenticApp() {
   const router = useRouter();
   // Machine Selection
@@ -1553,20 +1585,21 @@ export default function QwikprintAuthenticApp() {
     setPaymentFailure(null);
 
     try {
-      const isBlankSheets = filesList.length === 0 && blankSheetCount > 0;
+      const isBlankSheets = (filesList.length === 0 && blankSheetCount > 0) || filesList.some(f => f.id.startsWith('blank-a4-'));
+      const count = isBlankSheets ? (blankSheetCount || filesList[0]?.pages || 1) : 1;
       const primaryFileName = isBlankSheets
-        ? `${blankSheetCount} Blank A4 Sheets`
+        ? `${count} Blank A4 Sheets`
         : filesList.map(f => f.name).join(', ');
 
       const documentsPayload = isBlankSheets
         ? [{
-          name: `${blankSheetCount} Blank A4 Sheets`,
-          pages: blankSheetCount,
+          name: `${count} Blank A4 Sheets`,
+          pages: count,
           copies: 1,
           colorMode: 'bw' as ColorMode,
           duplexMode: 'simplex' as DuplexMode,
-          selectedPagesCount: blankSheetCount,
-          pageRangeStr: `1-${blankSheetCount}`,
+          selectedPagesCount: count,
+          pageRangeStr: `1-${count}`,
         }]
         : filesList.map(f => {
           const isRange = f.pageSelectionType === 'range' && f.selectedPages && f.selectedPages.length < (f.pages || 1);
@@ -1590,14 +1623,14 @@ export default function QwikprintAuthenticApp() {
         body: JSON.stringify({
           machineCode: selectedMachineCode,
           fileName: primaryFileName,
-          fileSizeFormatted: isBlankSheets ? `${blankSheetCount} Sheets` : `${filesList.length} Files`,
+          fileSizeFormatted: isBlankSheets ? `${count} Sheets` : `${filesList.length} Files`,
           customerPhone: cleanedPhone,
           customerName: validName,
           documents: documentsPayload,
-          copies: filesList[0]?.copies || 1,
-          colorMode: filesList[0]?.colorMode || 'bw',
-          duplexMode: filesList[0]?.duplexMode || 'simplex',
-          pageRangeStr: primaryRange,
+          copies: isBlankSheets ? 1 : (filesList[0]?.copies || 1),
+          colorMode: 'bw',
+          duplexMode: 'simplex',
+          pageRangeStr: isBlankSheets ? `1-${count}` : primaryRange,
         }),
       });
       const data = await res.json();
@@ -1620,13 +1653,26 @@ export default function QwikprintAuthenticApp() {
                 body: formData,
               });
               // Break after first file: only the primary document is used for printing.
-              // If multi-document support is needed later, the upload API must be changed
-              // to append to a files[] array in DB instead of overwriting file_storage_url.
               break;
             } catch (e) {
               console.warn('Document storage upload notice:', e);
             }
           }
+        }
+      } else if (isBlankSheets) {
+        try {
+          const blankBlob = createBlankPdfBlob(count);
+          const blankFile = new File([blankBlob], `${count}_Blank_A4_Sheets.pdf`, { type: 'application/pdf' });
+          const formData = new FormData();
+          formData.append('file', blankFile);
+          formData.append('orderId', data.order.id);
+          formData.append('fileName', `${count} Blank A4 Sheets.pdf`);
+          await fetch('/api/documents/upload', {
+            method: 'POST',
+            body: formData,
+          });
+        } catch (e) {
+          console.warn('Blank sheet storage upload notice:', e);
         }
       }
 
@@ -2283,7 +2329,7 @@ export default function QwikprintAuthenticApp() {
                         selectedPages: Array.from({ length: blankSheetCount }, (_, i) => i + 1),
                         customRangeInput: `1-${blankSheetCount}`,
                         isImage: false,
-                        file: new File([''], 'Blank-Paper.pdf', { type: 'application/pdf' }),
+                        file: new File([createBlankPdfBlob(blankSheetCount)], `${blankSheetCount}_Blank_A4_Sheets.pdf`, { type: 'application/pdf' }),
                       };
                       setFilesList([blankDoc]);
                       setSelectedDocId(blankDoc.id);
