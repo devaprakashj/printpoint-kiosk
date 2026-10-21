@@ -72,8 +72,8 @@ export async function GET(req: NextRequest) {
           .eq('machine_code', cleanCode)
           .in('order_status', ['printing', 'paid_ready_to_print'])
           .eq('payment_status', 'paid')
-          .gte('updated_at', cutoffTime) // Use updated_at as it's always set
-          .order('updated_at', { ascending: false })
+          .gte('created_at', cutoffTime)
+          .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
 
@@ -93,7 +93,7 @@ export async function GET(req: NextRequest) {
             amount: totalPaise % 100 === 0 ? `${totalPaise / 100}` : (totalPaise / 100).toFixed(2),
             totalAmountPaise: totalPaise,
             orderStatus: recentOrder.order_status,
-            releasedAt: recentOrder.pin_used_at || recentOrder.updated_at,
+            releasedAt: recentOrder.pin_used_at || recentOrder.created_at,
           };
           // Cache it in-memory to reduce DB polling on subsequent requests
           db.setMachineLiveActiveOrder(cleanCode, liveActiveOrder);

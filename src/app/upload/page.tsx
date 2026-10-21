@@ -6,34 +6,34 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { sounds } from '@/lib/sound';
 import confetti from 'canvas-confetti';
-import { 
-  UploadCloud, 
-  HelpCircle, 
-  ChevronDown, 
-  CheckCircle2, 
-  Copy, 
-  Check, 
-  Monitor, 
-  FileText, 
-  RefreshCw, 
-  X, 
-  Printer, 
-  Trash2, 
-  ShieldCheck, 
-  Maximize2, 
-  Settings, 
-  Info, 
-  Pencil, 
-  Zap, 
-  QrCode, 
-  Lock, 
-  Share2, 
-  Download, 
-  ArrowRight, 
-  ArrowLeft, 
-  Sparkles, 
-  MapPin, 
-  Clock, 
+import {
+  UploadCloud,
+  HelpCircle,
+  ChevronDown,
+  CheckCircle2,
+  Copy,
+  Check,
+  Monitor,
+  FileText,
+  RefreshCw,
+  X,
+  Printer,
+  Trash2,
+  ShieldCheck,
+  Maximize2,
+  Settings,
+  Info,
+  Pencil,
+  Zap,
+  QrCode,
+  Lock,
+  Share2,
+  Download,
+  ArrowRight,
+  ArrowLeft,
+  Sparkles,
+  MapPin,
+  Clock,
   Smartphone,
   AlertCircle,
   RotateCcw,
@@ -107,7 +107,7 @@ export default function QwikprintAuthenticApp() {
   const [activePreviewPage, setActivePreviewPage] = useState<number>(1);
   const [showSpecificPageModal, setShowSpecificPageModal] = useState(false);
   const [showFullPreviewModal, setShowFullPreviewModal] = useState(false);
-  
+
   // Step 4: Phone Verification & Review Order State
   const [customerPhone, setCustomerPhone] = useState<string>('');
   const [customerName, setCustomerName] = useState<string>('');
@@ -253,9 +253,9 @@ export default function QwikprintAuthenticApp() {
               pin: activeOrder.fourDigitPin,
               orderNumber: activeOrder.orderNumber,
             }),
-          }).catch(() => {});
+          }).catch(() => { });
         }
-      } catch (e) {}
+      } catch (e) { }
     }
   }, [currentStep]);
 
@@ -370,8 +370,8 @@ export default function QwikprintAuthenticApp() {
   const activeDocPages = activeDoc.pages || 1;
 
   // Total pages across all documents
-  const totalCombinedPages = filesList.length > 0 
-    ? filesList.reduce((sum, doc) => sum + (doc.pages || 1), 0) 
+  const totalCombinedPages = filesList.length > 0
+    ? filesList.reduce((sum, doc) => sum + (doc.pages || 1), 0)
     : activeDocPages;
 
   // Helper to update the currently active document's settings
@@ -405,6 +405,13 @@ export default function QwikprintAuthenticApp() {
       return;
     }
 
+    // Use live pricing from admin API (pricingRule), fall back to defaults only if not loaded
+    const bwSinglePaise = pricingRule?.bwSinglePaise ?? 200;       // ₹2.00 default
+    const bwDuplexPaise = pricingRule?.bwDuplexPaise ?? 400;       // ₹4.00 default
+    const colorSinglePaise = pricingRule?.colorSinglePaise ?? 1000; // ₹10.00 default
+    const colorDuplexPaise = pricingRule?.colorDuplexPaise ?? 2000; // ₹20.00 default
+    const minimumOrderPaise = pricingRule?.minimumOrderPaise ?? 200; // ₹2.00 minimum
+
     let grandTotalSheets = 0;
     let grandTotalPrintPages = 0;
     let grandTotalPaise = 0;
@@ -417,28 +424,32 @@ export default function QwikprintAuthenticApp() {
       const docCopies = Math.max(1, doc.copies || 1);
       const isSinglePage = effectivePages <= 1;
 
-      // Rate per single page (B&W = ₹2.00, Color = ₹10.00)
-      const singlePagePaise = doc.colorMode === 'bw' ? 200 : 1000;
-      // Rate per 2-sided sheet (B&W = ₹3.50, Color = ₹18.00)
-      const duplexSheetPaise = doc.colorMode === 'bw' ? 350 : 1800;
+      // Get per-page rates based on color mode
+      const singlePagePaise = doc.colorMode === 'bw' ? bwSinglePaise : colorSinglePaise;
+      const duplexSheetPaise = doc.colorMode === 'bw' ? bwDuplexPaise : colorDuplexPaise;
 
       let docSheets = 0;
       let docCostPaise = 0;
 
-      if (doc.duplexMode === 'simplex' || (isSinglePage && docCopies === 1)) {
+      if (doc.duplexMode === 'simplex') {
+        // Simplex: each page = 1 physical sheet
         docSheets = effectivePages * docCopies;
         docCostPaise = effectivePages * docCopies * singlePagePaise;
+      } else if (isSinglePage && docCopies === 1) {
+        // Single-page simplex
+        docSheets = 1;
+        docCostPaise = singlePagePaise;
       } else if (isSinglePage && docCopies > 1) {
-        // 1-page document with multiple copies printed double-sided (back-to-back)
+        // 1-page document with multiple copies: pair them back-to-back on sheets
         const fullDuplexSheets = Math.floor(docCopies / 2);
         const leftoverSimplex = docCopies % 2;
         docSheets = Math.ceil(docCopies / 2);
         docCostPaise = (fullDuplexSheets * duplexSheetPaise) + (leftoverSimplex * singlePagePaise);
       } else {
-        // Multi-page document printed double-sided
-        const fullDuplexSheetsPerCopy = Math.floor(effectivePages / 2);
-        const leftoverSimplexPerCopy = effectivePages % 2;
+        // Multi-page duplex: ceil(pages/2) sheets per copy
         const sheetsPerCopy = Math.ceil(effectivePages / 2);
+        const fullDuplexSheetsPerCopy = Math.floor(effectivePages / 2);
+        const leftoverSimplexPerCopy = effectivePages % 2; // odd page = 1 simplex on last sheet
         const costPerCopyPaise = (fullDuplexSheetsPerCopy * duplexSheetPaise) + (leftoverSimplexPerCopy * singlePagePaise);
 
         docSheets = sheetsPerCopy * docCopies;
@@ -452,22 +463,25 @@ export default function QwikprintAuthenticApp() {
       grandTotalPaise += docCostPaise;
     });
 
+    // Apply minimum order amount
+    const finalPaise = Math.max(grandTotalPaise, minimumOrderPaise);
+
     setPriceQuote({
       pagesToPrintPerCopy: grandTotalPrintPages,
       totalPrintPages: grandTotalPrintPages,
       totalSheets: grandTotalSheets,
-      ratePerSheetPaise: 200,
-      subtotalPaise: grandTotalPaise,
+      ratePerSheetPaise: bwSinglePaise,
+      subtotalPaise: finalPaise,
       taxPaise: 0,
-      totalAmountPaise: grandTotalPaise,
-      formattedTotalRupees: (grandTotalPaise % 100 === 0) 
-        ? `₹${(grandTotalPaise / 100).toFixed(0)}` 
-        : `₹${(grandTotalPaise / 100).toFixed(2)}`,
-      formattedSubtotalRupees: (grandTotalPaise % 100 === 0) 
-        ? `₹${(grandTotalPaise / 100).toFixed(0)}` 
-        : `₹${(grandTotalPaise / 100).toFixed(2)}`,
+      totalAmountPaise: finalPaise,
+      formattedTotalRupees: (finalPaise % 100 === 0)
+        ? `₹${(finalPaise / 100).toFixed(0)}`
+        : `₹${(finalPaise / 100).toFixed(2)}`,
+      formattedSubtotalRupees: (finalPaise % 100 === 0)
+        ? `₹${(finalPaise / 100).toFixed(0)}`
+        : `₹${(finalPaise / 100).toFixed(2)}`,
     });
-  }, [filesList]);
+  }, [filesList, pricingRule]);
 
   // Preload & Ensure PDF.js engine is available with blob worker support
   const ensurePdfJsLoaded = (): Promise<any> => {
@@ -604,7 +618,7 @@ export default function QwikprintAuthenticApp() {
       }
       const buffer = await file.arrayBuffer();
       const text = new TextDecoder('latin1').decode(buffer);
-      
+
       const pageMatches = text.match(/\/Type\s*\/Page\b/g);
       if (pageMatches && pageMatches.length > 0) {
         return pageMatches.length;
@@ -1041,7 +1055,7 @@ export default function QwikprintAuthenticApp() {
                 const decompressed = await new Response(stream).arrayBuffer();
                 xml = new TextDecoder('utf-8').decode(decompressed);
               }
-            } catch (e) {}
+            } catch (e) { }
           }
           if (xml) {
             slideXmls.push({ name: filename, text: xml });
@@ -1218,7 +1232,7 @@ export default function QwikprintAuthenticApp() {
       detectedPages: 0,
       totalDocs: files.length,
     });
-    
+
     // STAGE 1: Processing Files... (Screenshot 1)
     setIsProcessingModal(true);
     setIsProcessSuccess(false);
@@ -1411,6 +1425,27 @@ export default function QwikprintAuthenticApp() {
     }
   };
 
+  // Helper to format selected page numbers into human-readable range (e.g. "1-2" or "1, 3")
+  const formatPageArrayToRange = (pages: number[]): string => {
+    if (!pages || pages.length === 0) return 'all';
+    const sorted = Array.from(new Set(pages)).sort((a, b) => a - b);
+    const ranges: string[] = [];
+    let start = sorted[0];
+    let prev = sorted[0];
+
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i] === prev + 1) {
+        prev = sorted[i];
+      } else {
+        ranges.push(start === prev ? `${start}` : `${start}-${prev}`);
+        start = sorted[i];
+        prev = sorted[i];
+      }
+    }
+    ranges.push(start === prev ? `${start}` : `${start}-${prev}`);
+    return ranges.join(', ');
+  };
+
   // Toggle page in Specific Page modal for activeDoc
   const togglePageSelection = (pageNum: number) => {
     sounds.keyPress();
@@ -1421,9 +1456,12 @@ export default function QwikprintAuthenticApp() {
       currentSelected.add(pageNum);
     }
     const updatedArray = Array.from(currentSelected).sort((a, b) => a - b);
+    const docTotalPages = activeDoc.pages || 1;
+    const isAll = updatedArray.length === docTotalPages;
     updateActiveDoc({
       selectedPages: updatedArray,
-      pageSelectionType: 'range',
+      pageSelectionType: isAll ? 'all' : 'range',
+      customRangeInput: isAll ? `1-${docTotalPages}` : formatPageArrayToRange(updatedArray),
     });
   };
 
@@ -1447,9 +1485,12 @@ export default function QwikprintAuthenticApp() {
       }
     }
     if (s.size > 0) {
+      const arr = Array.from(s).sort((a, b) => a - b);
+      const isAll = arr.length === docPages;
       updateActiveDoc({
-        selectedPages: Array.from(s).sort((a, b) => a - b),
-        pageSelectionType: 'range',
+        selectedPages: arr,
+        pageSelectionType: isAll ? 'all' : 'range',
+        customRangeInput: isAll ? `1-${docPages}` : formatPageArrayToRange(arr),
       });
     }
   };
@@ -1462,8 +1503,8 @@ export default function QwikprintAuthenticApp() {
         isMachineMaintenance
           ? 'This Print ATM kiosk is currently under maintenance. Orders are temporarily paused.'
           : isPaperOut
-          ? 'This Print ATM kiosk is currently out of paper. Orders will resume shortly once refilled.'
-          : 'This Print ATM is currently unavailable. Orders are temporarily paused. Please check back shortly or choose another kiosk.'
+            ? 'This Print ATM kiosk is currently out of paper. Orders will resume shortly once refilled.'
+            : 'This Print ATM is currently unavailable. Orders are temporarily paused. Please check back shortly or choose another kiosk.'
       );
       return;
     }
@@ -1486,8 +1527,8 @@ export default function QwikprintAuthenticApp() {
         isMachineMaintenance
           ? 'This Print ATM kiosk is currently under maintenance. New orders cannot be accepted right now.'
           : isPaperOut
-          ? 'This Print ATM kiosk is currently out of paper. Orders will resume shortly once refilled.'
-          : 'This Print ATM is currently unavailable. Orders are temporarily paused. Please check back shortly or choose another kiosk.'
+            ? 'This Print ATM kiosk is currently out of paper. Orders will resume shortly once refilled.'
+            : 'This Print ATM is currently unavailable. Orders are temporarily paused. Please check back shortly or choose another kiosk.'
       );
       return;
     }
@@ -1513,29 +1554,35 @@ export default function QwikprintAuthenticApp() {
 
     try {
       const isBlankSheets = filesList.length === 0 && blankSheetCount > 0;
-      const primaryFileName = isBlankSheets 
-        ? `${blankSheetCount} Blank A4 Sheets` 
+      const primaryFileName = isBlankSheets
+        ? `${blankSheetCount} Blank A4 Sheets`
         : filesList.map(f => f.name).join(', ');
 
       const documentsPayload = isBlankSheets
         ? [{
-            name: `${blankSheetCount} Blank A4 Sheets`,
-            pages: blankSheetCount,
-            copies: 1,
-            colorMode: 'bw' as ColorMode,
-            duplexMode: 'simplex' as DuplexMode,
-            selectedPagesCount: blankSheetCount,
-            pageRangeStr: `1-${blankSheetCount}`,
-          }]
-        : filesList.map(f => ({
+          name: `${blankSheetCount} Blank A4 Sheets`,
+          pages: blankSheetCount,
+          copies: 1,
+          colorMode: 'bw' as ColorMode,
+          duplexMode: 'simplex' as DuplexMode,
+          selectedPagesCount: blankSheetCount,
+          pageRangeStr: `1-${blankSheetCount}`,
+        }]
+        : filesList.map(f => {
+          const isRange = f.pageSelectionType === 'range' && f.selectedPages && f.selectedPages.length < (f.pages || 1);
+          const rangeStr = isRange ? (f.customRangeInput || formatPageArrayToRange(f.selectedPages || [])) : 'all';
+          return {
             name: f.name,
             pages: f.pages || 1,
             copies: f.copies || 1,
             colorMode: f.colorMode || 'bw',
             duplexMode: f.duplexMode || 'simplex',
-            selectedPagesCount: f.pageSelectionType === 'range' && f.selectedPages?.length ? f.selectedPages.length : (f.pages || 1),
-            pageRangeStr: f.customRangeInput || 'all',
-          }));
+            selectedPagesCount: isRange && f.selectedPages?.length ? f.selectedPages.length : (f.pages || 1),
+            pageRangeStr: rangeStr,
+          };
+        });
+
+      const primaryRange = documentsPayload[0]?.pageRangeStr || 'all';
 
       const res = await fetch('/api/orders/create', {
         method: 'POST',
@@ -1550,6 +1597,7 @@ export default function QwikprintAuthenticApp() {
           copies: filesList[0]?.copies || 1,
           colorMode: filesList[0]?.colorMode || 'bw',
           duplexMode: filesList[0]?.duplexMode || 'simplex',
+          pageRangeStr: primaryRange,
         }),
       });
       const data = await res.json();
@@ -1610,11 +1658,10 @@ export default function QwikprintAuthenticApp() {
   };
 
   return (
-    <div className={`bg-futuristic-grid text-slate-900 flex flex-col font-sans selection:bg-blue-600 selection:text-white ${
-      currentStep === 'configure_settings' || currentStep === 'blank_sheets'
+    <div className={`bg-futuristic-grid text-slate-900 flex flex-col font-sans selection:bg-blue-600 selection:text-white ${currentStep === 'configure_settings' || currentStep === 'blank_sheets'
         ? 'min-h-screen lg:h-screen lg:max-h-screen lg:overflow-hidden justify-between'
         : 'min-h-screen'
-    }`}>
+      }`}>
       {/* Hidden File Inputs (Supports Multiple Files Selection - PDF, Word, PPT, Excel, TXT, Images) */}
       <input
         ref={fileInputRef}
@@ -1660,11 +1707,10 @@ export default function QwikprintAuthenticApp() {
           <button
             type="button"
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-            className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/95 hover:bg-white border shadow-xs hover:shadow-sm text-left group cursor-pointer transition-all backdrop-blur-xs ${
-              !isMachineOperational
+            className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/95 hover:bg-white border shadow-xs hover:shadow-sm text-left group cursor-pointer transition-all backdrop-blur-xs ${!isMachineOperational
                 ? 'border-red-300 ring-2 ring-red-500/20'
                 : 'border-slate-200/90 hover:border-blue-400'
-            }`}
+              }`}
           >
             {/* Live Operational Status Indicator */}
             {isMachineOperational ? (
@@ -1711,11 +1757,10 @@ export default function QwikprintAuthenticApp() {
                   <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
                     Designated Campus Print ATM
                   </span>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                    isMachineOperational
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${isMachineOperational
                       ? 'text-emerald-700 bg-emerald-50 border-emerald-200/60'
                       : 'text-rose-700 bg-rose-50 border-rose-200/60'
-                  }`}>
+                    }`}>
                     {isMachineOperational ? '🟢 Live System' : '🔴 System Paused'}
                   </span>
                 </div>
@@ -1732,11 +1777,10 @@ export default function QwikprintAuthenticApp() {
                           setCurrentMachine(m);
                           setIsDropdownOpen(false);
                         }}
-                        className={`w-full rounded-xl p-3 text-left text-xs transition-all flex flex-col gap-1.5 cursor-pointer border ${
-                          isSelected
+                        className={`w-full rounded-xl p-3 text-left text-xs transition-all flex flex-col gap-1.5 cursor-pointer border ${isSelected
                             ? 'bg-blue-50/70 border-blue-300 text-slate-900 shadow-2xs'
                             : 'border-transparent text-slate-700 hover:bg-slate-50 hover:border-slate-200'
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1.5">
@@ -1782,15 +1826,14 @@ export default function QwikprintAuthenticApp() {
       </div>
 
       {/* ================= MAIN CONTENT CONTAINER ================= */}
-      <main className={`flex-1 mx-auto w-full px-4 sm:px-6 lg:px-8 transition-all duration-300 ${
-        currentStep === 'configure_settings' || currentStep === 'pin_success'
+      <main className={`flex-1 mx-auto w-full px-4 sm:px-6 lg:px-8 transition-all duration-300 ${currentStep === 'configure_settings' || currentStep === 'pin_success'
           ? 'max-w-6xl flex flex-col justify-center py-3 sm:py-5'
           : currentStep === 'blank_sheets'
-          ? 'max-w-4xl flex flex-col justify-center py-1 sm:py-2 lg:py-3'
-          : currentStep === 'upload_landing'
-          ? 'max-w-5xl space-y-6 pb-20 pt-2 xs:pt-3 sm:pt-5'
-          : 'max-w-3xl space-y-6 pb-28 pt-4 sm:pt-6'
-      }`}>
+            ? 'max-w-4xl flex flex-col justify-center py-1 sm:py-2 lg:py-3'
+            : currentStep === 'upload_landing'
+              ? 'max-w-5xl space-y-6 pb-20 pt-2 xs:pt-3 sm:pt-5'
+              : 'max-w-3xl space-y-6 pb-28 pt-4 sm:pt-6'
+        }`}>
         {/* ================= STEP A: INITIAL UPLOAD BOX & FULL LANDING EXPERIENCE ================= */}
         {currentStep === 'upload_landing' && (
           <div className="space-y-6 animate-fade-in">
@@ -1824,8 +1867,8 @@ export default function QwikprintAuthenticApp() {
                       {isMachineMaintenance
                         ? 'Print ATM is in Maintenance Mode'
                         : isPaperOut
-                        ? 'Print ATM Paper Tray is Empty'
-                        : 'Print ATM is Temporarily Unavailable'}
+                          ? 'Print ATM Paper Tray is Empty'
+                          : 'Print ATM is Temporarily Unavailable'}
                     </h3>
                     <span className="text-[10px] font-bold uppercase tracking-wider bg-red-100 border border-red-300 text-red-700 px-2 py-0.5 rounded-full">
                       Orders Paused
@@ -1835,8 +1878,8 @@ export default function QwikprintAuthenticApp() {
                     {isMachineMaintenance
                       ? 'This station is undergoing scheduled maintenance. Orders are temporarily paused.'
                       : isPaperOut
-                      ? 'The paper supply is currently empty. Orders will resume shortly once refilled.'
-                      : 'This kiosk is temporarily unavailable or switched off. Orders are paused until the machine comes back online.'}
+                        ? 'The paper supply is currently empty. Orders will resume shortly once refilled.'
+                        : 'This kiosk is temporarily unavailable or switched off. Orders are paused until the machine comes back online.'}
                   </p>
                 </div>
               </div>
@@ -1845,21 +1888,19 @@ export default function QwikprintAuthenticApp() {
             {/* 2. MAIN UPLOAD & BLANK SHEETS GRID (High-End Production UI) */}
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-stretch">
               {/* Main Document Dropzone (Spans 8 cols on desktop) */}
-              <div className={`md:col-span-8 rounded-3xl border bg-white p-5 sm:p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col justify-between space-y-4 transition-all ${
-                !isMachineOperational ? 'border-red-200/90 bg-red-50/10' : 'border-slate-200/90 hover:border-blue-300'
-              }`}>
+              <div className={`md:col-span-8 rounded-3xl border bg-white p-5 sm:p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col justify-between space-y-4 transition-all ${!isMachineOperational ? 'border-red-200/90 bg-red-50/10' : 'border-slate-200/90 hover:border-blue-300'
+                }`}>
                 {/* Header Strip */}
                 <div className="flex items-center pb-3 border-b border-slate-100 gap-2">
                   <div className="flex items-start gap-2 sm:gap-2.5 min-w-0">
-                    <div className={`h-2 w-2 rounded-full shrink-0 mt-1 sm:mt-1.5 ${
-                      isMachineOperational ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'
-                    }`} />
+                    <div className={`h-2 w-2 rounded-full shrink-0 mt-1 sm:mt-1.5 ${isMachineOperational ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'
+                      }`} />
                     <div className="min-w-0">
                       <h2 className="text-xs xs:text-sm sm:text-base font-black text-slate-900 leading-tight">
                         Upload Lab Records, Notes & Assignments
                       </h2>
                       <p className="text-[10px] xs:text-[11px] text-slate-400 font-medium mt-0.5">
-                        {isMachineOperational 
+                        {isMachineOperational
                           ? 'Zero-queue laser print • Auto-scaled for standard A4 record & assignment submissions'
                           : 'Print ATM is currently unavailable. Orders cannot be accepted right now.'}
                       </p>
@@ -1876,18 +1917,17 @@ export default function QwikprintAuthenticApp() {
                         isMachineMaintenance
                           ? 'This Print ATM is under maintenance. New orders cannot be placed.'
                           : isPaperOut
-                          ? 'This Print ATM is out of paper. Orders will resume shortly once refilled.'
-                          : 'This Print ATM is currently unavailable. Orders are temporarily paused. Please try again later.'
+                            ? 'This Print ATM is out of paper. Orders will resume shortly once refilled.'
+                            : 'This Print ATM is currently unavailable. Orders are temporarily paused. Please try again later.'
                       );
                       return;
                     }
                     fileInputRef.current?.click();
                   }}
-                  className={`w-full relative rounded-2xl border-2 border-dashed p-6 sm:p-8 text-center group transition-all duration-300 shadow-inner flex flex-col items-center justify-center gap-3 overflow-hidden ${
-                    !isMachineOperational
+                  className={`w-full relative rounded-2xl border-2 border-dashed p-6 sm:p-8 text-center group transition-all duration-300 shadow-inner flex flex-col items-center justify-center gap-3 overflow-hidden ${!isMachineOperational
                       ? 'border-red-300/80 bg-red-50/30 cursor-not-allowed opacity-90'
                       : 'border-blue-300/80 hover:border-blue-600 bg-gradient-to-b from-[#f8fafd] to-white cursor-pointer'
-                  }`}
+                    }`}
                 >
                   {/* Subtle Background Accent Glow */}
                   <div className="absolute inset-0 bg-radial-gradient from-blue-50/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
@@ -1910,11 +1950,10 @@ export default function QwikprintAuthenticApp() {
 
                   {/* Main Call to Action */}
                   <div className="space-y-1 relative z-10">
-                    <div className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-extrabold text-xs shadow-md transition-all ${
-                      !isMachineOperational
+                    <div className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-extrabold text-xs shadow-md transition-all ${!isMachineOperational
                         ? 'bg-red-600 text-white cursor-not-allowed shadow-red-500/25'
                         : 'bg-[#2563eb] hover:bg-[#1d4ed8] text-white shadow-blue-500/25 group-hover:shadow-lg group-hover:shadow-blue-500/35'
-                    }`}>
+                      }`}>
                       {!isMachineOperational ? (
                         <>
                           <AlertCircle className="w-4 h-4 stroke-[2.4]" />
@@ -1928,8 +1967,8 @@ export default function QwikprintAuthenticApp() {
                       )}
                     </div>
                     <p className="text-xs text-slate-600 font-semibold pt-1">
-                      {!isMachineOperational 
-                        ? 'This Print ATM is temporarily unavailable. Please check back shortly.' 
+                      {!isMachineOperational
+                        ? 'This Print ATM is temporarily unavailable. Please check back shortly.'
                         : 'or drag & drop your Records, Notes & PPT slides here'}
                     </p>
                   </div>
@@ -1948,7 +1987,7 @@ export default function QwikprintAuthenticApp() {
               </div>
 
               {/* Blank A4 Sheets Dispenser Card (Spans 4 cols on desktop) */}
-              <div 
+              <div
                 onClick={() => {
                   if (!isMachineOperational) {
                     sounds.error();
@@ -1956,8 +1995,8 @@ export default function QwikprintAuthenticApp() {
                       isMachineMaintenance
                         ? 'This Print ATM is under maintenance. Blank sheet dispensing is paused.'
                         : isPaperOut
-                        ? 'This Print ATM is out of paper. Blank sheet dispensing is paused.'
-                        : 'This Print ATM is currently OFFLINE. Blank sheet dispensing is paused.'
+                          ? 'This Print ATM is out of paper. Blank sheet dispensing is paused.'
+                          : 'This Print ATM is currently OFFLINE. Blank sheet dispensing is paused.'
                     );
                     return;
                   }
@@ -2102,7 +2141,7 @@ export default function QwikprintAuthenticApp() {
 
             {/* Desktop Unified 2-Column Card / Mobile Balanced Stack */}
             <div className="rounded-3xl border border-slate-200/90 bg-white p-4 sm:p-6 lg:p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] grid grid-cols-1 md:grid-cols-12 gap-4 lg:gap-6 items-center">
-              
+
               {/* Left Column (5 cols on desktop): Visual & Info */}
               <div className="md:col-span-5 flex flex-col items-center md:items-start text-center md:text-left space-y-2.5 md:border-r md:border-slate-100 md:pr-6">
                 {/* Visual */}
@@ -2205,11 +2244,10 @@ export default function QwikprintAuthenticApp() {
                         sounds.keyPress();
                         setBlankSheetCount(preset);
                       }}
-                      className={`py-1.5 px-1 rounded-xl border text-center transition-all active:scale-95 cursor-pointer ${
-                        blankSheetCount === preset
+                      className={`py-1.5 px-1 rounded-xl border text-center transition-all active:scale-95 cursor-pointer ${blankSheetCount === preset
                           ? 'border-[#2563eb] bg-blue-50 text-[#2563eb] shadow-xs'
                           : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
-                      }`}
+                        }`}
                     >
                       <span className="font-black text-xs sm:text-sm block">{preset}</span>
                       <span className="text-[9px] sm:text-[10px] opacity-75 font-semibold block leading-tight">sheets</span>
@@ -2269,13 +2307,12 @@ export default function QwikprintAuthenticApp() {
                         handlePayAndGeneratePin();
                       }
                     }}
-                    className={`h-11 px-5 sm:px-6 rounded-xl font-bold text-xs sm:text-sm tracking-wide flex items-center justify-center gap-2 group transition-all ${
-                      !isMachineOperational
+                    className={`h-11 px-5 sm:px-6 rounded-xl font-bold text-xs sm:text-sm tracking-wide flex items-center justify-center gap-2 group transition-all ${!isMachineOperational
                         ? 'bg-red-600 text-white cursor-not-allowed shadow-none'
                         : blankSheetCount > 0
-                        ? 'btn-primary-glow text-white cursor-pointer shadow-md shadow-blue-500/25'
-                        : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
-                    }`}
+                          ? 'btn-primary-glow text-white cursor-pointer shadow-md shadow-blue-500/25'
+                          : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+                      }`}
                   >
                     {!isMachineOperational ? (
                       <span>Kiosk Unavailable</span>
@@ -2433,7 +2470,7 @@ export default function QwikprintAuthenticApp() {
                       <h3 className="font-extrabold text-sm text-slate-900 truncate group-hover:text-[#2563eb] transition-colors" title={doc.name}>
                         {doc.name}
                       </h3>
-                      
+
                       <div className="flex items-center justify-between gap-1.5 text-[11px] font-medium text-slate-600">
                         <div className="flex items-center gap-1.5 whitespace-nowrap shrink-0">
                           <span className="text-slate-500 font-mono">{doc.sizeFormatted}</span>
@@ -2475,11 +2512,10 @@ export default function QwikprintAuthenticApp() {
                           setSelectedDocId(doc.id);
                           setActivePreviewPage(1);
                         }}
-                        className={`h-7 px-2.5 rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 border ${
-                          isSelected
+                        className={`h-7 px-2.5 rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 border ${isSelected
                             ? 'bg-[#2563eb] text-white border-[#2563eb] shadow-xs'
                             : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100 hover:border-slate-300'
-                        }`}
+                          }`}
                       >
                         <span className="font-mono text-[10px] opacity-85">#{idx + 1}</span>
                         <span className="max-w-[90px] sm:max-w-[130px] truncate">{doc.name}</span>
@@ -2575,13 +2611,12 @@ export default function QwikprintAuthenticApp() {
                           sounds.keyPress();
                           updateActiveDoc({ colorMode: 'bw' });
                         }}
-                        className={`flex items-center justify-between px-2 py-1.5 rounded-lg border transition-all text-left ${
-                          !machineSupportsBw
+                        className={`flex items-center justify-between px-2 py-1.5 rounded-lg border transition-all text-left ${!machineSupportsBw
                             ? 'opacity-40 cursor-not-allowed bg-slate-100 border-slate-200'
                             : (activeDoc.colorMode || 'bw') === 'bw'
-                            ? 'border-[#2563eb] bg-blue-50 shadow-2xs ring-1 ring-[#2563eb]/30 cursor-pointer'
-                            : 'border-slate-200 bg-white hover:bg-slate-50 cursor-pointer'
-                        }`}
+                              ? 'border-[#2563eb] bg-blue-50 shadow-2xs ring-1 ring-[#2563eb]/30 cursor-pointer'
+                              : 'border-slate-200 bg-white hover:bg-slate-50 cursor-pointer'
+                          }`}
                       >
                         <div>
                           <span className="font-bold text-xs text-slate-900 block">B/W</span>
@@ -2606,13 +2641,12 @@ export default function QwikprintAuthenticApp() {
                           sounds.keyPress();
                           updateActiveDoc({ colorMode: 'color' });
                         }}
-                        className={`flex items-center justify-between px-2 py-1.5 rounded-lg border transition-all text-left ${
-                          !machineSupportsColor
+                        className={`flex items-center justify-between px-2 py-1.5 rounded-lg border transition-all text-left ${!machineSupportsColor
                             ? 'opacity-40 cursor-not-allowed bg-slate-100 border-slate-200'
                             : activeDoc.colorMode === 'color'
-                            ? 'border-[#2563eb] bg-blue-50 shadow-2xs ring-1 ring-[#2563eb]/30 cursor-pointer'
-                            : 'border-slate-200 bg-white hover:bg-slate-50 cursor-pointer'
-                        }`}
+                              ? 'border-[#2563eb] bg-blue-50 shadow-2xs ring-1 ring-[#2563eb]/30 cursor-pointer'
+                              : 'border-slate-200 bg-white hover:bg-slate-50 cursor-pointer'
+                          }`}
                         title={!machineSupportsColor ? 'Color printing disabled on this kiosk' : ''}
                       >
                         <div>
@@ -2666,11 +2700,10 @@ export default function QwikprintAuthenticApp() {
                               sounds.keyPress();
                               updateActiveDoc({ duplexMode: 'simplex' });
                             }}
-                            className={`flex items-center justify-between px-2 py-1.5 rounded-lg border transition-all text-left cursor-pointer ${
-                              (activeDoc.duplexMode || 'simplex') === 'simplex' || isDuplexDisabled
+                            className={`flex items-center justify-between px-2 py-1.5 rounded-lg border transition-all text-left cursor-pointer ${(activeDoc.duplexMode || 'simplex') === 'simplex' || isDuplexDisabled
                                 ? 'border-[#2563eb] bg-blue-50 shadow-2xs ring-1 ring-[#2563eb]/30'
                                 : 'border-slate-200 bg-white hover:bg-slate-50'
-                            }`}
+                              }`}
                           >
                             <span className="font-bold text-xs text-slate-900">1-sided</span>
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="shrink-0">
@@ -2700,13 +2733,12 @@ export default function QwikprintAuthenticApp() {
                               updateActiveDoc({ duplexMode: 'duplex' });
                             }}
                             title={isDuplexDisabled ? 'Requires 2 or more total pages or copies' : 'Print double-sided back-to-back'}
-                            className={`flex items-center justify-between px-2 py-1.5 rounded-lg border transition-all text-left ${
-                              isDuplexDisabled
+                            className={`flex items-center justify-between px-2 py-1.5 rounded-lg border transition-all text-left ${isDuplexDisabled
                                 ? 'opacity-40 cursor-not-allowed bg-slate-50 border-slate-200'
                                 : activeDoc.duplexMode === 'duplex'
                                   ? 'border-[#2563eb] bg-blue-50 shadow-2xs ring-1 ring-[#2563eb]/30 cursor-pointer'
                                   : 'border-slate-200 bg-white hover:bg-slate-50 cursor-pointer'
-                            }`}
+                              }`}
                           >
                             <div className="flex items-center gap-1">
                               <span className="font-bold text-xs text-slate-900">2-sided</span>
@@ -2747,11 +2779,10 @@ export default function QwikprintAuthenticApp() {
                           sounds.keyPress();
                           updateActiveDoc({ orientation: 'portrait' });
                         }}
-                        className={`flex items-center justify-between px-2 py-1.5 rounded-lg border transition-all text-left cursor-pointer ${
-                          (activeDoc.orientation || 'portrait') === 'portrait'
+                        className={`flex items-center justify-between px-2 py-1.5 rounded-lg border transition-all text-left cursor-pointer ${(activeDoc.orientation || 'portrait') === 'portrait'
                             ? 'border-[#2563eb] bg-blue-50 shadow-2xs ring-1 ring-[#2563eb]/30'
                             : 'border-slate-200 bg-white hover:bg-slate-50'
-                        }`}
+                          }`}
                       >
                         <span className="font-bold text-xs text-slate-900">Portrait</span>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="shrink-0">
@@ -2766,11 +2797,10 @@ export default function QwikprintAuthenticApp() {
                           sounds.keyPress();
                           updateActiveDoc({ orientation: 'landscape' });
                         }}
-                        className={`flex items-center justify-between px-2 py-1.5 rounded-lg border transition-all text-left cursor-pointer ${
-                          activeDoc.orientation === 'landscape'
+                        className={`flex items-center justify-between px-2 py-1.5 rounded-lg border transition-all text-left cursor-pointer ${activeDoc.orientation === 'landscape'
                             ? 'border-[#2563eb] bg-blue-50 shadow-2xs ring-1 ring-[#2563eb]/30'
                             : 'border-slate-200 bg-white hover:bg-slate-50'
-                        }`}
+                          }`}
                       >
                         <span className="font-bold text-xs text-slate-900">Landscape</span>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="shrink-0">
@@ -2798,11 +2828,10 @@ export default function QwikprintAuthenticApp() {
                             selectedPages: Array.from({ length: activeDoc.pages || 1 }, (_, i) => i + 1),
                           });
                         }}
-                        className={`py-1.5 rounded-lg border text-xs font-bold transition-all text-center cursor-pointer ${
-                          (activeDoc.pageSelectionType || 'all') === 'all'
+                        className={`py-1.5 rounded-lg border text-xs font-bold transition-all text-center cursor-pointer ${(activeDoc.pageSelectionType || 'all') === 'all'
                             ? 'border-[#2563eb] bg-blue-50 text-[#2563eb]'
                             : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                        }`}
+                          }`}
                       >
                         All ({activeDoc.pages || 1} {activeDoc.pages === 1 ? 'page' : 'pages'})
                       </button>
@@ -2814,11 +2843,10 @@ export default function QwikprintAuthenticApp() {
                           updateActiveDoc({ pageSelectionType: 'range' });
                           setShowSpecificPageModal(true);
                         }}
-                        className={`py-1.5 rounded-lg border text-xs font-bold transition-all text-center cursor-pointer ${
-                          activeDoc.pageSelectionType === 'range'
+                        className={`py-1.5 rounded-lg border text-xs font-bold transition-all text-center cursor-pointer ${activeDoc.pageSelectionType === 'range'
                             ? 'border-[#2563eb] bg-blue-50 text-[#2563eb]'
                             : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                        }`}
+                          }`}
                       >
                         Range ({activeDoc.selectedPages?.length || activeDoc.pages || 1} of {activeDoc.pages || 1} pgs)
                       </button>
@@ -2858,31 +2886,28 @@ export default function QwikprintAuthenticApp() {
 
                   {/* A4 Paper Viewport */}
                   <div className="w-full rounded-xl bg-slate-100/90 border border-slate-200/80 p-2 flex items-center justify-center min-h-[140px] max-h-[155px] overflow-hidden">
-                    <div className={`bg-white rounded shadow-md border border-slate-300 transition-all duration-300 overflow-hidden flex flex-col justify-between ${
-                      activeDoc.orientation === 'landscape'
+                    <div className={`bg-white rounded shadow-md border border-slate-300 transition-all duration-300 overflow-hidden flex flex-col justify-between ${activeDoc.orientation === 'landscape'
                         ? 'w-[154px] h-[108px]'
                         : 'w-[108px] h-[150px]'
-                    }`}>
+                      }`}>
                       <div className="flex-1 w-full overflow-hidden flex items-center justify-center relative p-1 bg-white">
                         {activeDoc.pageThumbnails && activeDoc.pageThumbnails[activePreviewPage - 1] ? (
                           <img
                             src={activeDoc.pageThumbnails[activePreviewPage - 1]}
                             alt={`Page ${activePreviewPage}`}
-                            className={`w-full h-full object-contain pointer-events-none transition-all duration-300 ${
-                              activeDoc.colorMode === 'bw'
+                            className={`w-full h-full object-contain pointer-events-none transition-all duration-300 ${activeDoc.colorMode === 'bw'
                                 ? 'grayscale contrast-110 brightness-95'
                                 : 'filter-none contrast-100'
-                            }`}
+                              }`}
                           />
                         ) : activeDoc.previewUrl && activeDoc.isImage ? (
                           <img
                             src={activeDoc.previewUrl}
                             alt={activeDoc.name}
-                            className={`w-full h-full object-contain pointer-events-none transition-all duration-300 ${
-                              activeDoc.colorMode === 'bw'
+                            className={`w-full h-full object-contain pointer-events-none transition-all duration-300 ${activeDoc.colorMode === 'bw'
                                 ? 'grayscale contrast-110 brightness-95'
                                 : 'filter-none contrast-100'
-                            }`}
+                              }`}
                           />
                         ) : (
                           <div className="p-2 w-full h-full flex flex-col justify-between select-none bg-white">
@@ -2962,11 +2987,10 @@ export default function QwikprintAuthenticApp() {
                       type="button"
                       disabled={isProcessingPay || !isMachineOperational}
                       onClick={handleProceedClick}
-                      className={`h-9 px-4 rounded-xl font-bold text-xs tracking-wide flex items-center gap-1.5 transition-all ${
-                        !isMachineOperational
+                      className={`h-9 px-4 rounded-xl font-bold text-xs tracking-wide flex items-center gap-1.5 transition-all ${!isMachineOperational
                           ? 'bg-red-600 text-white cursor-not-allowed shadow-none'
                           : 'btn-primary-glow text-white cursor-pointer group disabled:opacity-50'
-                      }`}
+                        }`}
                     >
                       {!isMachineOperational ? (
                         <span>Kiosk Unavailable</span>
@@ -3017,7 +3041,7 @@ export default function QwikprintAuthenticApp() {
 
             {/* Desktop 2-Column Balanced Frame */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-              
+
               {/* ================= LEFT COLUMN (7 COLS): UPLOADED DOCUMENTS & STUDENT DETAILS ================= */}
               <div className="lg:col-span-7 space-y-5">
                 {/* 1. Uploaded Files Card with Individual Settings Badges */}
@@ -3253,11 +3277,10 @@ export default function QwikprintAuthenticApp() {
                     type="button"
                     onClick={() => handlePayAndGeneratePin()}
                     disabled={isProcessingPay || !isMachineOperational}
-                    className={`w-full h-12 rounded-2xl text-white font-bold text-sm tracking-wide flex items-center justify-center gap-2 transition-all ${
-                      !isMachineOperational
+                    className={`w-full h-12 rounded-2xl text-white font-bold text-sm tracking-wide flex items-center justify-center gap-2 transition-all ${!isMachineOperational
                         ? 'bg-red-600/90 cursor-not-allowed shadow-none'
                         : 'btn-primary-glow cursor-pointer group shadow-md shadow-blue-500/25'
-                    }`}
+                      }`}
                   >
                     {!isMachineOperational ? (
                       <div className="flex items-center gap-2">
@@ -3266,8 +3289,8 @@ export default function QwikprintAuthenticApp() {
                           {isMachineMaintenance
                             ? 'Kiosk in Maintenance — Orders Paused'
                             : isPaperOut
-                            ? 'Paper Empty — Orders Paused'
-                            : 'Kiosk Unavailable — Orders Paused'}
+                              ? 'Paper Empty — Orders Paused'
+                              : 'Kiosk Unavailable — Orders Paused'}
                         </span>
                       </div>
                     ) : isProcessingPay ? (
@@ -3332,14 +3355,54 @@ export default function QwikprintAuthenticApp() {
 
                   {/* Ticket Header with Tab Switcher */}
                   <div className="p-4 sm:p-5 space-y-3.5">
-                    <div className="text-center pb-2 border-b border-slate-100">
+
+                    {/* PROMINENT 4-DIGIT PIN CARD */}
+                    <div className="w-full rounded-2xl border-2 border-amber-300 bg-gradient-to-br from-amber-50 via-white to-amber-50/80 p-3.5 sm:p-4 shadow-sm text-center space-y-2">
+                      <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-900 text-[11px] font-black uppercase tracking-wider">
+                        <KeyRound className="w-3.5 h-3.5 text-amber-600" />
+                        <span>YOUR 4-DIGIT PRINT RELEASE PIN</span>
+                      </div>
+
+                      {/* GIANT 4-DIGIT PIN BOXES */}
+                      <div className="flex items-center justify-center gap-2 sm:gap-2.5 py-0.5">
+                        {String(activeOrder?.fourDigitPin || '----').split('').map((digit, idx) => (
+                          <div
+                            key={idx}
+                            className="w-12 h-14 sm:w-14 sm:h-16 rounded-2xl bg-slate-900 border-2 border-amber-400 text-amber-300 font-mono font-black text-2xl sm:text-3xl flex items-center justify-center shadow-md shadow-slate-900/15 select-all"
+                          >
+                            {digit}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center justify-center gap-2 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => copyPinToClipboard(activeOrder?.fourDigitPin || '')}
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold text-xs transition-colors cursor-pointer"
+                        >
+                          {copiedPin ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-amber-700" />}
+                          <span>{copiedPin ? 'PIN Copied!' : 'Copy PIN'}</span>
+                        </button>
+                        <span className="text-[11px] text-slate-700 font-bold">
+                          Type on Kiosk Touchscreen
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Divider */}
+                    <div className="relative flex items-center justify-center my-1">
+                      <div className="w-full border-t border-slate-200" />
+                      <span className="absolute bg-white px-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                        OR SCAN QR CODE
+                      </span>
+                    </div>
+
+                    <div className="text-center pb-1">
                       <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-black uppercase tracking-wider mb-1">
                         <Sparkles className="w-3.5 h-3.5" />
                         <span>Official QR Print Pass</span>
                       </div>
-                      <p className="text-base font-black text-slate-900">
-                        Scan at Kiosk to Release Document
-                      </p>
                       <p className="text-xs text-slate-500">
                         Hold this QR code in front of the scanner on Terminal {activeOrder.machineName || currentMachine?.displayName || 'RIT-ATM-01'}.
                       </p>
@@ -3629,11 +3692,10 @@ export default function QwikprintAuthenticApp() {
               type="button"
               disabled={isProcessingPay || !isMachineOperational}
               onClick={handleProceedClick}
-              className={`h-12 px-7 rounded-2xl font-bold text-sm tracking-wide flex items-center justify-center gap-2 transition-all ${
-                !isMachineOperational
+              className={`h-12 px-7 rounded-2xl font-bold text-sm tracking-wide flex items-center justify-center gap-2 transition-all ${!isMachineOperational
                   ? 'bg-red-600 text-white cursor-not-allowed shadow-none'
                   : 'btn-primary-glow text-white cursor-pointer group disabled:opacity-50'
-              }`}
+                }`}
             >
               {!isMachineOperational ? (
                 <span>Kiosk Unavailable</span>
@@ -3686,11 +3748,10 @@ export default function QwikprintAuthenticApp() {
                   </span>
                   <span className="text-[10px] text-red-500 font-semibold">*Required</span>
                 </label>
-                <div className={`flex rounded-2xl border bg-white shadow-2xs overflow-hidden transition-all ${
-                  nameError 
-                    ? 'border-red-500 ring-2 ring-red-500/20' 
+                <div className={`flex rounded-2xl border bg-white shadow-2xs overflow-hidden transition-all ${nameError
+                    ? 'border-red-500 ring-2 ring-red-500/20'
                     : 'border-slate-200 focus-within:border-[#2563eb] focus-within:ring-2 focus-within:ring-[#2563eb]/20'
-                }`}>
+                  }`}>
                   <input
                     type="text"
                     placeholder="Enter full name (e.g. Arun Kumar)"
@@ -3719,11 +3780,10 @@ export default function QwikprintAuthenticApp() {
                   </span>
                   <span className="text-[10px] text-red-500 font-semibold">*Required (10 digits)</span>
                 </label>
-                <div className={`flex rounded-2xl border bg-white shadow-2xs overflow-hidden transition-all ${
-                  phoneError 
-                    ? 'border-red-500 ring-2 ring-red-500/20' 
+                <div className={`flex rounded-2xl border bg-white shadow-2xs overflow-hidden transition-all ${phoneError
+                    ? 'border-red-500 ring-2 ring-red-500/20'
                     : 'border-slate-200 focus-within:border-[#2563eb] focus-within:ring-2 focus-within:ring-[#2563eb]/20'
-                }`}>
+                  }`}>
                   <div className="px-4 py-3 bg-slate-50 border-r border-slate-200 text-xs sm:text-sm font-bold text-slate-700 flex items-center select-none">
                     +91
                   </div>
@@ -3856,11 +3916,10 @@ export default function QwikprintAuthenticApp() {
                     key={pageNum}
                     type="button"
                     onClick={() => togglePageSelection(pageNum)}
-                    className={`relative rounded-2xl border-2 p-3 text-center transition-all flex flex-col items-center justify-between ${
-                      isSelected
+                    className={`relative rounded-2xl border-2 p-3 text-center transition-all flex flex-col items-center justify-between ${isSelected
                         ? 'border-[#2563eb] bg-blue-50'
                         : 'border-slate-200 bg-white opacity-50'
-                    }`}
+                      }`}
                   >
                     {/* Top Right Green Check Indicator */}
                     {isSelected && (
@@ -3875,17 +3934,15 @@ export default function QwikprintAuthenticApp() {
                         <img
                           src={activeDoc.pageThumbnails[pageNum - 1]}
                           alt={`Page ${pageNum}`}
-                          className={`w-full h-full object-contain pointer-events-none transition-all duration-300 ${
-                            activeDoc.colorMode === 'bw' ? 'grayscale contrast-110 brightness-95' : 'contrast-100'
-                          }`}
+                          className={`w-full h-full object-contain pointer-events-none transition-all duration-300 ${activeDoc.colorMode === 'bw' ? 'grayscale contrast-110 brightness-95' : 'contrast-100'
+                            }`}
                         />
                       ) : activeDoc.isImage && activeDoc.previewUrl ? (
                         <img
                           src={activeDoc.previewUrl}
                           alt={`Page ${pageNum}`}
-                          className={`w-full h-full object-contain pointer-events-none transition-all duration-300 ${
-                            activeDoc.colorMode === 'bw' ? 'grayscale contrast-110 brightness-95' : 'contrast-100'
-                          }`}
+                          className={`w-full h-full object-contain pointer-events-none transition-all duration-300 ${activeDoc.colorMode === 'bw' ? 'grayscale contrast-110 brightness-95' : 'contrast-100'
+                            }`}
                         />
                       ) : (
                         <div className="p-2 h-full w-full flex flex-col justify-between select-none bg-white text-slate-800">
@@ -3916,7 +3973,10 @@ export default function QwikprintAuthenticApp() {
             {/* Confirm Button */}
             <button
               type="button"
-              onClick={() => setShowSpecificPageModal(false)}
+              onClick={() => {
+                handleApplyRangeInput();
+                setShowSpecificPageModal(false);
+              }}
               className="w-full py-3.5 rounded-2xl bg-[#2563eb] hover:bg-[#2563eb] text-white font-bold text-sm shadow-md active:scale-95 transition-all"
             >
               Confirm
@@ -3968,8 +4028,8 @@ export default function QwikprintAuthenticApp() {
               {activeDoc.pageThumbnails && activeDoc.pageThumbnails.length > 0 ? (
                 <div className="space-y-4 max-w-xl mx-auto">
                   {activeDoc.pageThumbnails.map((thumb, idx) => (
-                    <div 
-                      key={idx} 
+                    <div
+                      key={idx}
                       className="bg-white rounded-xl shadow-md border border-slate-200/80 overflow-hidden relative group"
                     >
                       <div className="p-2 bg-slate-50 border-b border-slate-100 flex items-center justify-between text-xs font-semibold text-slate-600">
@@ -3982,9 +4042,8 @@ export default function QwikprintAuthenticApp() {
                         <img
                           src={thumb}
                           alt={`Page ${idx + 1}`}
-                          className={`max-h-[60vh] w-auto object-contain rounded shadow-2xs transition-all duration-300 ${
-                            activeDoc.colorMode === 'bw' ? 'grayscale contrast-110 brightness-95' : 'contrast-100'
-                          }`}
+                          className={`max-h-[60vh] w-auto object-contain rounded shadow-2xs transition-all duration-300 ${activeDoc.colorMode === 'bw' ? 'grayscale contrast-110 brightness-95' : 'contrast-100'
+                            }`}
                         />
                       </div>
                     </div>
@@ -3995,9 +4054,8 @@ export default function QwikprintAuthenticApp() {
                   <img
                     src={activeDoc.previewUrl}
                     alt={activeDoc.name}
-                    className={`max-h-[65vh] w-auto object-contain rounded-xl shadow-md bg-white p-2 transition-all duration-300 ${
-                      activeDoc.colorMode === 'bw' ? 'grayscale contrast-110 brightness-95' : 'contrast-100'
-                    }`}
+                    className={`max-h-[65vh] w-auto object-contain rounded-xl shadow-md bg-white p-2 transition-all duration-300 ${activeDoc.colorMode === 'bw' ? 'grayscale contrast-110 brightness-95' : 'contrast-100'
+                      }`}
                   />
                 </div>
               ) : (
@@ -4073,7 +4131,7 @@ export default function QwikprintAuthenticApp() {
                       </span>
                       <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping" />
                     </div>
-                    
+
                     <div className="space-y-1.5 py-2">
                       <div className="h-1.5 bg-slate-200 rounded-full w-full" />
                       <div className="h-1.5 bg-slate-150 rounded-full w-4/5" />
@@ -4138,7 +4196,7 @@ export default function QwikprintAuthenticApp() {
                       <span className="font-mono font-bold text-[#2563eb]">{uploadProgress}%</span>
                     </div>
                     <div className="h-2 w-full rounded-full bg-slate-200/70 overflow-hidden">
-                      <div 
+                      <div
                         className="h-full rounded-full bg-[#2563eb] transition-all duration-300 ease-out"
                         style={{ width: `${uploadProgress}%` }}
                       />
@@ -4190,9 +4248,9 @@ export default function QwikprintAuthenticApp() {
                   <div className="flex items-center gap-3">
                     {uploadingDocMeta?.previewThumbnail ? (
                       <div className="w-12 h-15 rounded-lg border border-slate-200 bg-white overflow-hidden shadow-2xs shrink-0 flex items-center justify-center p-0.5">
-                        <img 
-                          src={uploadingDocMeta.previewThumbnail} 
-                          alt="Thumbnail" 
+                        <img
+                          src={uploadingDocMeta.previewThumbnail}
+                          alt="Thumbnail"
                           className="w-full h-full object-contain"
                         />
                       </div>
@@ -4251,7 +4309,7 @@ export default function QwikprintAuthenticApp() {
 
                   {/* Sleek Auto-Close Countdown Progress Track */}
                   <div className="h-1.5 w-full rounded-full bg-slate-100 overflow-hidden border border-slate-200/80">
-                    <div 
+                    <div
                       className="h-full rounded-full bg-[#2563eb] transition-all duration-[2000ms] ease-linear w-full animate-pulse"
                     />
                   </div>
@@ -4384,11 +4442,10 @@ export default function QwikprintAuthenticApp() {
                         setCurrentMachine(m);
                         setShowStationModal(false);
                       }}
-                      className={`w-full rounded-2xl p-4 text-left transition-all border cursor-pointer space-y-2 ${
-                        isSelected
+                      className={`w-full rounded-2xl p-4 text-left transition-all border cursor-pointer space-y-2 ${isSelected
                           ? 'bg-blue-50/80 border-blue-400 shadow-xs ring-2 ring-blue-500/20'
                           : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300'
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2 flex-wrap">

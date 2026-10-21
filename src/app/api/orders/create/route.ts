@@ -200,6 +200,7 @@ export async function POST(req: NextRequest) {
     const resolvedCopies = firstDoc?.copies ? Math.max(1, Number(firstDoc.copies)) : Math.max(1, Number(copies) || 1);
     const resolvedColorMode: ColorMode = (firstDoc?.colorMode || colorMode) === 'color' ? 'color' : 'bw';
     const resolvedDuplexMode: DuplexMode = (firstDoc?.duplexMode || duplexMode) === 'duplex' ? 'duplex' : 'simplex';
+    const resolvedPageRanges = String(firstDoc?.pageRangeStr || pageRangeStr || 'all').trim();
 
     if (isSupabaseConfigured && supabaseAdmin) {
       const insertPayload: any = {
@@ -210,7 +211,7 @@ export async function POST(req: NextRequest) {
         file_name: String(primaryFileName),
         file_size_formatted: String(fileSizeFormatted),
         detected_total_pages: grandTotalPrintPages,
-        selected_page_ranges: String(pageRangeStr || 'all'),
+        selected_page_ranges: resolvedPageRanges,
         calculated_print_pages: grandTotalPrintPages,
         calculated_sheets: grandTotalSheets,
         copies: resolvedCopies,
@@ -292,7 +293,7 @@ export async function POST(req: NextRequest) {
         fileName: String(primaryFileName),
         fileSizeFormatted: String(fileSizeFormatted),
         detectedTotalPages: grandTotalPrintPages,
-        selectedPageRanges: String(pageRangeStr || 'all'),
+        selectedPageRanges: resolvedPageRanges,
         calculatedPrintPages: grandTotalPrintPages,
         calculatedSheets: grandTotalSheets,
         copies: resolvedCopies,

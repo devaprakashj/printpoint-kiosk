@@ -187,6 +187,7 @@ export async function POST(req: NextRequest) {
               colorMode: ord.color_mode || 'bw',
               duplexMode: ord.duplex_mode || 'single',
               paperSize: ord.paper_size || 'A4',
+              pageRanges: ord.selected_page_ranges || 'all',
               pin: ord.four_digit_pin || 'N/A',
               releasedAt: ord.pin_used_at || new Date().toISOString(),
             });

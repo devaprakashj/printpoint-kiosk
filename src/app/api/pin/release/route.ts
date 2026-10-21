@@ -6,7 +6,8 @@ import { db } from '@/lib/db';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { orderId, pin, machineCode } = body;
+    const { orderId, pin, machineCode, orderNumber } = body;
+    const targetOrderId = orderId || orderNumber;
 
     let order: any = null;
     let targetMachineCode = machineCode;
@@ -16,12 +17,12 @@ export async function POST(req: NextRequest) {
       let query = supabaseAdmin.from('orders').select('*');
       if (pin) {
         query = query.eq('four_digit_pin', String(pin).trim());
-      } else if (orderId) {
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(orderId));
+      } else if (targetOrderId) {
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(targetOrderId));
         if (isUuid) {
-          query = query.eq('id', orderId);
+          query = query.eq('id', targetOrderId);
         } else {
-          query = query.eq('order_number', orderId);
+          query = query.eq('order_number', targetOrderId);
         }
       }
 
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
             type: 'ALREADY_USED',
             orderNumber: oData.order_number || `ORD-${oData.id.slice(0, 8)}`,
             fileName: oData.file_name || 'Document.pdf',
-            completedAt: oData.pin_used_at || oData.updated_at,
+            completedAt: oData.pin_used_at || oData.created_at,
             message: 'This QR Pass has already been used and printed! Single-use passes cannot be reused.',
             tamilMessage: 'இந்த QR பாஸ் ஏற்கனவே பிரிண்ட் செய்யப்பட்டு விட்டது! மறுமுறை பயன்படுத்த முடியாது.',
           };
@@ -56,15 +57,18 @@ export async function POST(req: NextRequest) {
         order = oData;
 
         // Set PIN as active/printing and used (Do not shred storage file yet; file is shredded upon hardware job-ack confirmation)
-        await supabaseAdmin
+        const { error: updateOrderErr } = await supabaseAdmin
           .from('orders')
           .update({
             order_status: 'printing',
             payment_status: 'paid',
             pin_used_at: completedAt,
-            updated_at: completedAt,
           })
           .eq('id', oData.id);
+
+        if (updateOrderErr) {
+          console.error('[PIN RELEASE] Failed to update order status in Supabase:', updateOrderErr);
+        }
 
         // Decrement machine paper count in Supabase
         if (targetMachineCode) {
@@ -131,6 +135,7 @@ export async function POST(req: NextRequest) {
       colorMode: finalOrder?.colorMode || finalOrder?.color_mode || 'bw',
       duplexMode: finalOrder?.duplexMode || finalOrder?.duplex_mode || 'single',
       paperSize: finalOrder?.paperSize || finalOrder?.paper_size || 'A4',
+      pageRanges: finalOrder?.selected_page_ranges || finalOrder?.selectedPageRanges || finalOrder?.pageRangeStr || 'all',
       pin: pin || 'N/A',
       releasedAt: completedAt,
     };

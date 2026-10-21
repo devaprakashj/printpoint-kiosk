@@ -27,11 +27,14 @@ import {
   Radio,
   XCircle,
   AlertTriangle,
+  KeyRound,
+  Delete,
 } from 'lucide-react';
 
 // Streamlined Autonomous Kiosk Navigation Screens
 type KioskScreen = 
   | 'ready_to_scan' 
+  | 'enter_pin' 
   | 'order_details' 
   | 'printing' 
   | 'print_complete' 
@@ -52,6 +55,11 @@ export default function AutonomousTouchscreenKiosk() {
   const [activeOrder, setActiveOrder] = useState<any | null>(null);
   const [isVerifyingOrder, setIsVerifyingOrder] = useState<boolean>(false);
   const [scanError, setScanError] = useState<string | null>(null);
+
+  // 4-Digit PIN Input State
+  const [enteredPin, setEnteredPin] = useState<string>('');
+  const [isVerifyingPin, setIsVerifyingPin] = useState<boolean>(false);
+  const [pinError, setPinError] = useState<string | null>(null);
 
   // Auto-Print Countdown on Order Details Screen
   const [autoPrintCountdown, setAutoPrintCountdown] = useState<number>(3);
@@ -179,6 +187,9 @@ export default function AutonomousTouchscreenKiosk() {
     setActiveOrder(null);
     setScanAlert(null);
     setScanError(null);
+    setEnteredPin('');
+    setPinError(null);
+    setIsVerifyingPin(false);
     setIsVerifyingOrder(false);
     setPrintProgress(0);
     setPrintStep(1);
@@ -195,6 +206,87 @@ export default function AutonomousTouchscreenKiosk() {
         clearScanAlert: true,
       }),
     }).catch(() => {});
+  };
+
+  // ── PIN KEYPAD HANDLERS ──
+  const handleDigitPress = (digit: string) => {
+    if (enteredPin.length < 4) {
+      playTouchTone(700 + enteredPin.length * 90);
+      const newPin = enteredPin + digit;
+      setEnteredPin(newPin);
+      setPinError(null);
+      if (newPin.length === 4) {
+        verifyEnteredPin(newPin);
+      }
+    }
+  };
+
+  const handleBackspace = () => {
+    playTouchTone(600);
+    setEnteredPin((prev) => prev.slice(0, -1));
+    setPinError(null);
+  };
+
+  const handleClearPin = () => {
+    playTouchTone(500);
+    setEnteredPin('');
+    setPinError(null);
+  };
+
+  const verifyEnteredPin = async (pinToVerify?: string) => {
+    const pinCode = pinToVerify || enteredPin;
+    if (!pinCode || pinCode.length !== 4) {
+      setPinError('Please enter a 4-digit PIN');
+      playTouchTone(220, 0.3);
+      return;
+    }
+
+    setIsVerifyingPin(true);
+    setPinError(null);
+
+    try {
+      const res = await fetch('/api/pin/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pin: pinCode,
+          machineCode,
+        }),
+      });
+
+      const data = await res.json();
+      setIsVerifyingPin(false);
+
+      if (!data.success) {
+        if (data.alreadyUsed || data.error?.includes('already been used') || data.error?.includes('already been printed') || data.error?.includes('fulfilled')) {
+          setScanAlert({
+            type: 'ALREADY_USED',
+            orderNumber: data.order?.order_number || data.order?.orderNumber,
+            fileName: data.order?.file_name || data.order?.fileName,
+            message: data.error,
+            tamilMessage: 'இந்த PIN ஏற்கனவே பயன்படுத்தப்பட்டுவிட்டது! மறுமுறை பயன்படுத்த முடியாது.',
+          });
+          playTouchTone(220, 0.4);
+          setTimeout(() => setScanAlert(null), 7000);
+          return;
+        }
+        setPinError(data.error || 'Invalid PIN. Please check your mobile receipt.');
+        playTouchTone(220, 0.3);
+        return;
+      }
+
+      // Order Found & Authenticated!
+      setActiveOrder(data.order);
+      setPinError(null);
+      setScanAlert(null);
+      setCurrentScreen('order_details');
+      playTouchTone(1320, 0.25);
+      setAutoPrintCountdown(3);
+    } catch {
+      setIsVerifyingPin(false);
+      setPinError('Connection error verifying PIN. Please try again.');
+      playTouchTone(220, 0.3);
+    }
   };
 
   // Notify server of scanner active state
@@ -280,15 +372,30 @@ export default function AutonomousTouchscreenKiosk() {
     }
   }, [currentScreen, machineCode]);
 
-  // USB Barcode Scanner Hardware Listener (Always active in ready_to_scan mode!)
+  // USB Barcode Scanner & Physical Keypad Listener
   useEffect(() => {
-    if (currentScreen !== 'ready_to_scan') {
+    if (currentScreen !== 'ready_to_scan' && currentScreen !== 'enter_pin') {
       barcodeBufferRef.current = '';
       if (barcodeTimerRef.current) clearTimeout(barcodeTimerRef.current);
       return;
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 1. If on enter_pin screen, support typing PIN via keyboard
+      if (currentScreen === 'enter_pin') {
+        if (/^[0-9]$/.test(e.key)) {
+          handleDigitPress(e.key);
+        } else if (e.key === 'Backspace') {
+          handleBackspace();
+        } else if (e.key === 'Enter') {
+          verifyEnteredPin();
+        } else if (e.key === 'Escape') {
+          resetToReady();
+        }
+        return;
+      }
+
+      // 2. If on ready_to_scan, capture USB scanner keystrokes or shortcut to PIN screen
       if (currentScreen !== 'ready_to_scan') return;
 
       if (e.key === 'Enter') {
@@ -312,7 +419,7 @@ export default function AutonomousTouchscreenKiosk() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentScreen, handleScannedQrData]);
+  }, [currentScreen, handleScannedQrData, enteredPin]);
 
   // ── LIVE SERVER-SYNCED SCAN LISTENER (Captures Pi Hardware Scans Instantly) ──
   const lastProcessedOrderIdRef = useRef<string>('');
@@ -552,151 +659,314 @@ export default function AutonomousTouchscreenKiosk() {
           {/* SCREEN 1: READY TO SCAN (PERMANENT IDLE STATE)                 */}
           {/* ══════════════════════════════════════════════════════════════ */}
           {currentScreen === 'ready_to_scan' && (
-            <div className="w-full max-w-2xl bg-white/95 backdrop-blur-2xl border border-slate-200/90 rounded-[32px] p-6 sm:p-8 shadow-[0_25px_60px_-15px_rgba(15,23,42,0.08),0_0_0_1px_rgba(255,255,255,0.9)] flex flex-col items-center text-center space-y-5 relative overflow-hidden animate-in fade-in duration-200">
+            <div className="w-full max-w-3xl bg-white/95 backdrop-blur-2xl border border-slate-200/90 rounded-[28px] p-4 sm:p-5 shadow-[0_20px_50px_-15px_rgba(15,23,42,0.08),0_0_0_1px_rgba(255,255,255,0.9)] flex flex-col items-center text-center space-y-3 relative overflow-hidden animate-in fade-in duration-200">
               <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-blue-600 via-indigo-500 to-blue-600" />
 
-              {/* Status Header */}
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 text-xs font-bold uppercase tracking-wider">
-                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping shrink-0" />
-                <span className="font-mono font-black">Optical Scanner Active &bull; Ready to Scan</span>
-              </div>
+              {/* Status Header Badge + Title in a clean compact header */}
+              <div className="flex flex-col items-center space-y-1">
+                <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping shrink-0" />
+                  <span className="font-mono font-black">Optical Scanner Active &bull; Ready to Scan</span>
+                </div>
 
-              {/* Terminal Title & Typing Pill */}
-              <div className="space-y-2 max-w-lg mx-auto">
-                <h1 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight leading-tight">
-                  Scan Your QR Pass
-                </h1>
-
-                {/* Sleek Kinetic Telemetry Typing Pill */}
-                <div className="min-h-[38px] flex items-center justify-center">
-                  <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-50/90 border border-blue-200/80 text-blue-700 text-xs sm:text-sm font-semibold tracking-wide shadow-2xs">
-                    <span className="h-2 w-2 rounded-full bg-blue-600 animate-ping shrink-0" />
+                <div className="flex items-center justify-center gap-2 pt-0.5">
+                  <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-none">
+                    Release Your Print Job
+                  </h1>
+                  <div className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-50 border border-blue-200/80 text-blue-700 text-[11px] font-semibold">
+                    <span className="h-1.5 w-1.5 rounded-full bg-blue-600 animate-pulse" />
                     <span className="font-mono">{typedText}</span>
-                    <span className="w-1 h-3.5 bg-blue-600 animate-pulse rounded-full" />
                   </div>
                 </div>
 
-                <p className="text-xs sm:text-sm text-slate-500 font-medium leading-relaxed max-w-md mx-auto">
-                  Hold your mobile phone with the <span className="text-blue-600 font-bold">QR Pass</span> in front of the kiosk scanner below. Printing begins automatically!
+                <p className="text-[11px] sm:text-xs text-slate-500 font-medium max-w-md mx-auto leading-tight">
+                  Hold mobile <span className="text-blue-600 font-bold">QR Pass</span> to scanner lens or tap <span className="text-indigo-600 font-bold">Enter PIN</span> below.
                 </p>
               </div>
 
-              {/* Center Holographic Scanner Target Animation */}
-              <div className="relative my-2 flex flex-col items-center justify-center">
+              {/* 2 Interactive Release Options Side-by-Side: QR Scanner vs Touch PIN */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
                 
-                {/* Outer Glow Ring */}
-                <div className="w-56 h-56 rounded-3xl bg-gradient-to-b from-blue-50 to-indigo-50/60 border-2 border-blue-200 flex flex-col items-center justify-center relative shadow-inner overflow-hidden group">
-                  
-                  {/* Target Crosshair Corners */}
-                  <div className="absolute inset-5 border-2 border-dashed border-blue-400/60 rounded-2xl pointer-events-none flex items-center justify-center">
-                    <div className="absolute -top-1 -left-1 w-6 h-6 border-t-3 border-l-3 border-blue-600 rounded-tl-lg" />
-                    <div className="absolute -top-1 -right-1 w-6 h-6 border-t-3 border-r-3 border-blue-600 rounded-tr-lg" />
-                    <div className="absolute -bottom-1 -left-1 w-6 h-6 border-b-3 border-l-3 border-blue-600 rounded-bl-lg" />
-                    <div className="absolute -bottom-1 -right-1 w-6 h-6 border-b-3 border-r-3 border-blue-600 rounded-br-lg" />
+                {/* OPTION A: Optical QR Scanner Box */}
+                <div className="p-3 rounded-2xl bg-gradient-to-b from-blue-50/70 to-indigo-50/40 border border-blue-200/80 flex flex-col items-center justify-between text-center relative group">
+                  <div className="text-left w-full flex items-center justify-between pb-1">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-4 h-4 rounded-md bg-blue-600 text-white font-black text-[9px] flex items-center justify-center">1</div>
+                      <span className="text-xs font-black text-slate-800">Scan QR Code</span>
+                    </div>
+                    <span className="text-[9px] font-mono text-blue-600 font-bold bg-blue-100/70 px-2 py-0.5 rounded-full">Touchless</span>
+                  </div>
 
-                    {/* Animated Scanning Beam */}
-                    <div
-                      className="absolute inset-x-2 h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent shadow-lg shadow-blue-500/80 animate-bounce duration-1000 opacity-90"
-                    />
+                  {/* Scanner Target Frame */}
+                  <div className="w-28 h-28 sm:w-32 sm:h-32 rounded-2xl bg-white border-2 border-blue-300 flex flex-col items-center justify-center relative shadow-xs overflow-hidden my-1">
+                    {/* Corners */}
+                    <div className="absolute inset-2 border border-dashed border-blue-400/50 rounded-xl pointer-events-none flex items-center justify-center">
+                      <div className="absolute -top-0.5 -left-0.5 w-3 h-3 border-t-2 border-l-2 border-blue-600 rounded-tl" />
+                      <div className="absolute -top-0.5 -right-0.5 w-3 h-3 border-t-2 border-r-2 border-blue-600 rounded-tr" />
+                      <div className="absolute -bottom-0.5 -left-0.5 w-3 h-3 border-b-2 border-l-2 border-blue-600 rounded-bl" />
+                      <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 border-b-2 border-r-2 border-blue-600 rounded-br" />
 
-                    {/* Hologram QR Icon */}
-                    <div className="flex flex-col items-center justify-center space-y-2 opacity-80 group-hover:scale-105 transition-transform">
-                      <QrCode className="h-20 w-20 text-blue-600 stroke-[1.5] animate-pulse" />
-                      <span className="text-[10px] font-mono font-bold text-blue-700 uppercase tracking-widest">
-                        Hold Pass Here
-                      </span>
+                      {/* Animated Laser Beam */}
+                      <div className="absolute inset-x-1 h-0.5 bg-gradient-to-r from-transparent via-blue-500 to-transparent shadow-md shadow-blue-500/80 animate-bounce duration-1000 opacity-90" />
+
+                      <div className="flex flex-col items-center justify-center space-y-0.5 opacity-80 group-hover:scale-105 transition-transform">
+                        <QrCode className="h-11 w-11 text-blue-600 stroke-[1.5] animate-pulse" />
+                        <span className="text-[8px] font-mono font-bold text-blue-700 uppercase tracking-widest">
+                          Hold Pass Here
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Verification Spinner */}
+                    {isVerifyingOrder && (
+                      <div className="absolute inset-0 bg-white/90 backdrop-blur-xs flex flex-col items-center justify-center space-y-1 z-10 animate-fade-in">
+                        <RefreshCw className="h-5 w-5 text-blue-600 animate-spin" />
+                        <span className="text-[9px] font-bold text-slate-800">Verifying Pass...</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <span className="text-[9px] font-mono text-slate-500 font-semibold">
+                    Distance: 10cm - 15cm from scanner
+                  </span>
+                </div>
+
+                {/* OPTION B: Touchscreen 4-Digit PIN Keypad Entry */}
+                <div className="p-3 rounded-2xl bg-gradient-to-b from-indigo-50/60 to-purple-50/40 border border-indigo-200/80 flex flex-col items-center justify-between text-center relative group">
+                  <div className="text-left w-full flex items-center justify-between pb-1">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-4 h-4 rounded-md bg-indigo-600 text-white font-black text-[9px] flex items-center justify-center">2</div>
+                      <span className="text-xs font-black text-slate-800">Enter 4-Digit PIN</span>
+                    </div>
+                    <span className="text-[9px] font-mono text-indigo-600 font-bold bg-indigo-100/70 px-2 py-0.5 rounded-full">Touchscreen</span>
+                  </div>
+
+                  {/* Big Touchscreen Action Icon & Info */}
+                  <div className="my-auto w-full py-1.5 flex flex-col items-center justify-center space-y-1">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-amber-500 text-amber-950 flex items-center justify-center shadow-sm">
+                      <KeyRound className="w-5 h-5 text-slate-900 group-hover:rotate-12 transition-transform" />
+                    </div>
+                    <div className="space-y-0.5">
+                      <span className="block text-xs font-bold text-slate-800">No QR Code with you?</span>
+                      <span className="block text-[10px] text-slate-500">Tap below to enter your mobile PIN on screen</span>
                     </div>
                   </div>
 
-                  {/* Verification Spinner Overlay if processing */}
-                  {isVerifyingOrder && (
-                    <div className="absolute inset-0 bg-white/90 backdrop-blur-xs flex flex-col items-center justify-center space-y-2 z-10 animate-fade-in">
-                      <RefreshCw className="h-8 w-8 text-blue-600 animate-spin" />
-                      <span className="text-xs font-bold text-slate-800">Verifying Pass...</span>
-                    </div>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playTouchTone(800);
+                      setEnteredPin('');
+                      setPinError(null);
+                      setCurrentScreen('enter_pin');
+                    }}
+                    className="w-full py-2.5 px-3.5 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-700 active:scale-98 text-white font-black text-xs sm:text-sm flex items-center justify-between shadow-md shadow-blue-500/20 transition-all cursor-pointer group"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <KeyRound className="w-3.5 h-3.5 text-amber-300" />
+                      Type PIN On Screen
+                    </span>
+                    <ArrowRight className="w-3.5 h-3.5 text-blue-200 group-hover:translate-x-1 transition-transform" />
+                  </button>
                 </div>
 
-                <span className="text-[11px] font-mono font-bold text-slate-400 mt-2.5">
-                  Scanner Lens Distance: 10cm - 15cm
-                </span>
               </div>
 
               {/* Security Alert: Already Used / Printed Pass */}
               {scanAlert && (
-                <div className="w-full max-w-lg p-4 sm:p-5 rounded-3xl bg-rose-50 border-2 border-rose-300 shadow-xl shadow-rose-500/10 flex flex-col items-center text-center space-y-2 animate-in zoom-in-95 duration-150 z-30">
-                  <div className="w-12 h-12 rounded-2xl bg-rose-100 flex items-center justify-center text-rose-600 shadow-xs">
-                    <AlertTriangle className="h-6 w-6 text-rose-600 animate-pulse" />
+                <div className="w-full max-w-lg p-2.5 rounded-2xl bg-rose-50 border-2 border-rose-300 shadow-md flex flex-col items-center text-center space-y-1 animate-in zoom-in-95 duration-150 z-30">
+                  <div className="flex items-center gap-2 text-rose-700">
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600 animate-pulse" />
+                    <h3 className="text-xs sm:text-sm font-black text-rose-950">
+                      QR பாஸ் ஏற்கனவே பயன்படுத்தப்பட்டுவிட்டது!
+                    </h3>
                   </div>
-                  <h3 className="text-base sm:text-lg font-black text-rose-950 tracking-tight">
-                    QR பாஸ் ஏற்கனவே பயன்படுத்தப்பட்டுவிட்டது!
-                  </h3>
-                  <div className="text-xs font-bold text-rose-700 flex items-center gap-1.5 flex-wrap justify-center">
-                    {scanAlert.orderNumber && (
-                      <span className="font-mono bg-rose-200/80 px-2.5 py-0.5 rounded-lg border border-rose-300 text-rose-900">
-                        #{scanAlert.orderNumber}
-                      </span>
-                    )}
-                    {scanAlert.fileName && (
-                      <span className="text-rose-800 truncate max-w-[220px]">
-                        &bull; {scanAlert.fileName}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs font-semibold text-rose-700 leading-snug">
+                  <p className="text-[10px] sm:text-[11px] font-semibold text-rose-700 leading-tight">
                     {scanAlert.tamilMessage || 'இந்த QR பாஸ் ஏற்கனவே பிரிண்ட் செய்யப்பட்டு விட்டது! மறுமுறை பயன்படுத்த முடியாது.'}
                   </p>
-                  <div className="text-[10px] font-mono text-rose-500 border-t border-rose-200 pt-1.5 w-full flex items-center justify-between px-2">
-                    <span>Already Printed &bull; Single-use Pass Only</span>
-                    <button
-                      onClick={() => setScanAlert(null)}
-                      className="font-bold underline hover:text-rose-800 cursor-pointer"
-                    >
-                      Dismiss
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => setScanAlert(null)}
+                    className="text-[10px] font-bold text-rose-600 underline hover:text-rose-800 cursor-pointer pt-0.5"
+                  >
+                    Dismiss
+                  </button>
                 </div>
               )}
 
               {/* Error Alert if any */}
               {scanError && !scanAlert && (
-                <div className="w-full max-w-md p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center justify-center gap-2 animate-in fade-in">
-                  <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
+                <div className="w-full max-w-md p-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center justify-center gap-2 animate-in fade-in">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0 text-rose-600" />
                   <span>{scanError}</span>
                 </div>
               )}
 
-              {/* 3 Step Touchless Guide */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 w-full pt-1 text-left">
-                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center gap-2.5">
-                  <div className="w-6 h-6 rounded-lg bg-blue-100 text-blue-700 font-black text-xs flex items-center justify-center shrink-0">1</div>
-                  <span className="text-[11px] font-semibold text-slate-700">Open QR Pass on mobile</span>
+              {/* 3 Step Touchless Guide - Ultra-compact horizontal row */}
+              <div className="grid grid-cols-3 gap-2 w-full text-left">
+                <div className="p-1.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center gap-1.5">
+                  <div className="w-4 h-4 rounded-md bg-blue-100 text-blue-700 font-black text-[9px] flex items-center justify-center shrink-0">1</div>
+                  <span className="text-[10px] font-semibold text-slate-700 truncate">Mobile QR / PIN</span>
                 </div>
-                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center gap-2.5">
-                  <div className="w-6 h-6 rounded-lg bg-blue-100 text-blue-700 font-black text-xs flex items-center justify-center shrink-0">2</div>
-                  <span className="text-[11px] font-semibold text-slate-700">Hold near scanner</span>
+                <div className="p-1.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center gap-1.5">
+                  <div className="w-4 h-4 rounded-md bg-blue-100 text-blue-700 font-black text-[9px] flex items-center justify-center shrink-0">2</div>
+                  <span className="text-[10px] font-semibold text-slate-700 truncate">Scan or Keypad</span>
                 </div>
-                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center gap-2.5">
-                  <div className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-700 font-black text-xs flex items-center justify-center shrink-0">3</div>
-                  <span className="text-[11px] font-semibold text-slate-700">Auto-prints in seconds</span>
+                <div className="p-1.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center gap-1.5">
+                  <div className="w-4 h-4 rounded-md bg-emerald-100 text-emerald-700 font-black text-[9px] flex items-center justify-center shrink-0">3</div>
+                  <span className="text-[10px] font-semibold text-slate-700 truncate">Instant Kyocera Print</span>
                 </div>
               </div>
 
               {/* Discreet Demo Helper */}
-              <div className="w-full pt-2 flex items-center justify-between text-[11px] text-slate-400 border-t border-slate-100">
-                <div className="flex items-center gap-2">
+              <div className="w-full pt-1 flex items-center justify-between text-[10px] text-slate-400 border-t border-slate-100">
+                <div className="flex items-center gap-1.5">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                   <span>Kyocera MFP Ready (Duplex A4)</span>
                 </div>
                 <button
                   onClick={handleSimulateQuickScan}
-                  className="text-[10px] font-mono text-slate-400 hover:text-blue-600 underline cursor-pointer"
+                  className="text-[9px] font-mono text-slate-400 hover:text-blue-600 underline cursor-pointer"
                   title="Simulate scanning a demo pass"
                 >
                   Test Demo Pass &rarr;
                 </button>
               </div>
 
+            </div>
+          )}
+
+          {/* ══════════════════════════════════════════════════════════════ */}
+          {/* SCREEN: ENTER 4-DIGIT PIN (ATM TOUCHSCREEN KEYPAD)              */}
+          {/* ══════════════════════════════════════════════════════════════ */}
+          {currentScreen === 'enter_pin' && (
+            <div className="w-full max-w-md bg-white/95 backdrop-blur-2xl border border-slate-200/90 rounded-[32px] p-5 sm:p-6 shadow-[0_25px_60px_-15px_rgba(15,23,42,0.1),0_0_0_1px_rgba(255,255,255,0.9)] flex flex-col items-center text-center space-y-4 relative overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+              <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-amber-500 via-blue-600 to-indigo-600" />
+
+              {/* Top Navigation Row */}
+              <div className="flex items-center justify-between w-full">
+                <button
+                  type="button"
+                  onClick={() => {
+                    playTouchTone(600);
+                    resetToReady();
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Back to Scan</span>
+                </button>
+
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-[11px] font-bold">
+                  <KeyRound className="w-3.5 h-3.5 text-blue-600" />
+                  <span>PIN Release Mode</span>
+                </div>
+              </div>
+
+              {/* Title */}
+              <div className="space-y-1">
+                <h2 className="text-2xl font-black text-slate-900 tracking-tight">
+                  Enter 4-Digit Print PIN
+                </h2>
+                <p className="text-xs text-slate-500 font-medium">
+                  Type the 4-digit code shown on your mobile screen
+                </p>
+              </div>
+
+              {/* 4-Box PIN Display */}
+              <div className="flex items-center justify-center gap-2.5 sm:gap-3 py-1">
+                {[0, 1, 2, 3].map((idx) => {
+                  const digit = enteredPin[idx];
+                  const isCurrent = idx === enteredPin.length;
+                  return (
+                    <div
+                      key={idx}
+                      className={`w-14 h-16 sm:w-16 sm:h-18 rounded-2xl border-2 flex items-center justify-center text-3xl font-mono font-black transition-all ${
+                        digit
+                          ? 'border-blue-600 bg-blue-50/60 text-blue-700 shadow-sm scale-105'
+                          : isCurrent
+                          ? 'border-blue-500 bg-white ring-4 ring-blue-100 text-slate-300 animate-pulse'
+                          : 'border-slate-200 bg-slate-50 text-slate-300'
+                      }`}
+                    >
+                      {digit ? digit : isCurrent ? '_' : '•'}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Pin Error Notification */}
+              {pinError && (
+                <div className="w-full p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center justify-center gap-2 animate-in fade-in">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                  <span>{pinError}</span>
+                </div>
+              )}
+
+              {/* Touchscreen ATM Keypad Grid */}
+              <div className="grid grid-cols-3 gap-2 sm:gap-2.5 max-w-[290px] sm:max-w-[310px] w-full mx-auto">
+                {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
+                  <button
+                    key={digit}
+                    type="button"
+                    onClick={() => handleDigitPress(digit)}
+                    disabled={isVerifyingPin}
+                    className="h-12 sm:h-13 rounded-2xl bg-slate-50 hover:bg-slate-100 active:bg-blue-100/60 border border-slate-200 hover:border-slate-300 text-2xl font-mono font-black text-slate-800 shadow-2xs active:scale-95 transition-all cursor-pointer flex items-center justify-center disabled:opacity-50 select-none"
+                  >
+                    {digit}
+                  </button>
+                ))}
+
+                {/* Clear Button */}
+                <button
+                  type="button"
+                  onClick={handleClearPin}
+                  disabled={isVerifyingPin || enteredPin.length === 0}
+                  className="h-12 sm:h-13 rounded-2xl bg-rose-50 hover:bg-rose-100 active:bg-rose-200 border border-rose-200 text-rose-700 text-xs font-bold uppercase tracking-wider shadow-2xs active:scale-95 transition-all cursor-pointer flex items-center justify-center disabled:opacity-40 select-none"
+                >
+                  Clear
+                </button>
+
+                {/* 0 Button */}
+                <button
+                  type="button"
+                  onClick={() => handleDigitPress('0')}
+                  disabled={isVerifyingPin}
+                  className="h-12 sm:h-13 rounded-2xl bg-slate-50 hover:bg-slate-100 active:bg-blue-100/60 border border-slate-200 hover:border-slate-300 text-2xl font-mono font-black text-slate-800 shadow-2xs active:scale-95 transition-all cursor-pointer flex items-center justify-center disabled:opacity-50 select-none"
+                >
+                  0
+                </button>
+
+                {/* Backspace Button */}
+                <button
+                  type="button"
+                  onClick={handleBackspace}
+                  disabled={isVerifyingPin || enteredPin.length === 0}
+                  className="h-12 sm:h-13 rounded-2xl bg-amber-50 hover:bg-amber-100 active:bg-amber-200 border border-amber-200 text-amber-800 text-sm font-bold shadow-2xs active:scale-95 transition-all cursor-pointer flex items-center justify-center disabled:opacity-40 select-none"
+                  title="Delete"
+                >
+                  <Delete className="w-5 h-5 text-amber-800" />
+                </button>
+              </div>
+
+              {/* Verify & Start Print Action Button */}
+              <button
+                type="button"
+                onClick={() => verifyEnteredPin()}
+                disabled={isVerifyingPin || enteredPin.length !== 4}
+                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 active:scale-98 text-white font-black text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/25 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {isVerifyingPin ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                    <span>Verifying PIN...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Verify &amp; Start Print</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
+              </button>
             </div>
           )}
 

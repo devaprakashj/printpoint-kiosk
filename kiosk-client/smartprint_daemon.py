@@ -461,12 +461,83 @@ def report_job_ack(server_url: str, order_id: str, order_number: str, pin: str, 
         print(f"  {YELLOW}[WARN] Could not report job ACK to cloud: {e}{RESET}", flush=True)
 
 
-def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_physically_online: bool, is_test_print: bool = False, is_duplex: bool = False, copies: int = 1) -> tuple[bool, str]:
+def parse_page_ranges(range_str: str, max_pages: int) -> list[int]:
+    """Parses range strings like '1-2', '1, 3', '2' into a list of 1-based page numbers."""
+    selected = set()
+    for part in range_str.split(','):
+        part = part.strip()
+        if not part:
+            continue
+        if '-' in part:
+            try:
+                st, end = part.split('-', 1)
+                st_n = max(1, int(st.strip()))
+                end_n = min(max_pages, int(end.strip()))
+                for p in range(st_n, end_n + 1):
+                    selected.add(p)
+            except Exception:
+                pass
+        else:
+            try:
+                p = int(part)
+                if 1 <= p <= max_pages:
+                    selected.add(p)
+            except Exception:
+                pass
+    return sorted(list(selected))
+
+
+def slice_pdf_to_pages(input_pdf: str, page_ranges: str) -> tuple[str, bool]:
+    """
+    Slices input PDF using poppler's pdfseparate & pdfunite to only include the requested pages.
+    Returns (effective_pdf_path, is_temp_sliced_file).
+    """
+    clean_range = str(page_ranges or "").strip()
+    if not clean_range or clean_range.lower() in ["all", "1-1", "none", "*"]:
+        return input_pdf, False
+
+    total_pages = get_pdf_page_count(input_pdf)
+    if total_pages <= 0:
+        return input_pdf, False
+
+    pages_to_keep = parse_page_ranges(clean_range, total_pages)
+    if not pages_to_keep or len(pages_to_keep) == total_pages:
+        return input_pdf, False
+
+    pid = os.getpid()
+    timestamp = int(time.time() * 1000)
+    temp_slices = []
+    sliced_pdf = input_pdf.replace(".pdf", f"_sliced_{timestamp}.pdf")
+
+    try:
+        for p in pages_to_keep:
+            sp = f"/tmp/sp_{pid}_{timestamp}_{p}.pdf"
+            res = subprocess.run(["pdfseparate", "-f", str(p), "-l", str(p), input_pdf, sp], capture_output=True)
+            if res.returncode == 0 and os.path.exists(sp):
+                temp_slices.append(sp)
+
+        if temp_slices:
+            unite_cmd = ["pdfunite"] + temp_slices + [sliced_pdf]
+            unite_res = subprocess.run(unite_cmd, capture_output=True)
+            if unite_res.returncode == 0 and os.path.exists(sliced_pdf):
+                print(f"  {CYAN}[PAGE RANGE FILTER]{RESET} Successfully sliced document from {total_pages} pages to requested {len(pages_to_keep)} pages: {clean_range}", flush=True)
+                return sliced_pdf, True
+    finally:
+        for sp in temp_slices:
+            try:
+                os.remove(sp)
+            except Exception:
+                pass
+
+    return input_pdf, False
+
+
+def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_physically_online: bool, is_test_print: bool = False, is_duplex: bool = False, copies: int = 1, page_ranges: str = "all") -> tuple[bool, str]:
     """
     Dispatches file to target printer spooler.
     Checks physical connectivity before attempting hardware paper feed.
     If is_test_print is True, physically activates the hardware paper feeder.
-    Supports CUPS duplex and multi-copy routing on Linux / Raspberry Pi.
+    Supports CUPS duplex, page ranges, and multi-copy routing on Linux / Raspberry Pi.
     """
     if not is_physically_online:
         if print_real or is_test_print:
@@ -517,9 +588,20 @@ def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_p
 
     elif platform.system() == "Linux":
         # Linux (Raspberry Pi 5 with CUPS)
+        temp_sliced_file = None
         try:
             print_file = filepath
             actual_copies = max(1, int(copies))
+            clean_ranges = str(page_ranges or "all").strip()
+
+            # Physical Page Range Enforcement:
+            # Slices the PDF so the file on disk sent to Kyocera contains ONLY the user's selected pages.
+            # This completely prevents Kyocera from printing unwanted pages!
+            if clean_ranges and clean_ranges.lower() != "all" and print_file.lower().endswith(".pdf"):
+                sliced_path, is_sliced = slice_pdf_to_pages(print_file, clean_ranges)
+                if is_sliced:
+                    print_file = sliced_path
+                    temp_sliced_file = sliced_path
 
             # Smart Duplex Imposition for 1-page documents with multiple copies:
             # CUPS duplex only applies across multiple pages within a single document stream.
@@ -545,6 +627,8 @@ def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_p
                     print(f"  {CYAN}[DISPATCH]{RESET} Submitting copy {copy_idx} of {actual_copies} to CUPS...", flush=True)
 
                 lp_cmd = ["lp", "-c", "-d", printer_name]
+                if clean_ranges and clean_ranges.lower() != "all":
+                    lp_cmd.extend(["-P", clean_ranges, "-o", f"page-ranges={clean_ranges}"])
                 if is_duplex:
                     lp_cmd.extend(["-o", "sides=two-sided-long-edge", "-o", "Duplex=DuplexNoTumble"])
                 else:
@@ -594,6 +678,12 @@ def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_p
             return True, f"Sent to CUPS -> [{printer_name}] ({', '.join(all_spool_msgs)}) [Hardware Confirmed: {actual_copies} copy/copies]"
         except Exception as e:
             return False, f"CUPS error: {e}"
+        finally:
+            if temp_sliced_file and os.path.exists(temp_sliced_file):
+                try:
+                    os.remove(temp_sliced_file)
+                except Exception:
+                    pass
 
     return True, f"Dispatched to [{printer_name}]"
 
@@ -639,9 +729,50 @@ def check_is_kiosk_scanner_active(server_url: str, machine_code: str) -> tuple[b
         return True, "ready_to_scan"
 
 
+def find_scanner_input_device() -> str | None:
+    """Finds the real physical USB barcode/QR scanner event device dynamically."""
+    # 1. Search /dev/input/by-id/ for known scanner signatures
+    by_id_matches = (
+        glob.glob('/dev/input/by-id/*Serial_To_HID*') or
+        glob.glob('/dev/input/by-id/*barcode*') or
+        glob.glob('/dev/input/by-id/*scanner*') or
+        glob.glob('/dev/input/by-id/*1a86*') or
+        glob.glob('/dev/input/by-id/*e026*')
+    )
+    if by_id_matches:
+        for p in by_id_matches:
+            if os.path.exists(p):
+                return os.path.realpath(p)
+
+    # 2. Check /proc/bus/input/devices for "Serial To HID" or Vendor 1a86:e026
+    try:
+        if os.path.exists('/proc/bus/input/devices'):
+            with open('/proc/bus/input/devices', 'r') as f:
+                content = f.read()
+            blocks = content.split('\n\n')
+            for b in blocks:
+                b_low = b.lower()
+                if any(x in b_low for x in ['serial to hid', '1a86', 'e026', 'barcode', 'qr scanner', 'scanner']):
+                    # Skip HDMI or CEC or power button
+                    if any(ign in b_low for ign in ['hdmi', 'pwr_button', 'vc4']):
+                        continue
+                    m = re.search(r'Handlers=.*?(event\d+)', b)
+                    if m:
+                        candidate = f"/dev/input/{m.group(1)}"
+                        if os.path.exists(candidate):
+                            return candidate
+    except Exception:
+        pass
+
+    return None
+
+
 def set_scanner_hardware_power(enable: bool = True) -> bool:
-    """Powers ON physical 5V USB power to MH-ET LIVE scanner via uhubctl on Raspberry Pi 5."""
+    """Powers ON physical 5V USB power to MH-ET LIVE scanner via uhubctl on Raspberry Pi 5 if not already active."""
     if platform.system() != "Linux":
+        return True
+    # If scanner device is ALREADY discovered, do NOT power-cycle (it causes a 15-second USB renegotiation)
+    if enable and find_scanner_input_device():
         return True
     uhubctl_bin = "/usr/sbin/uhubctl" if os.path.exists("/usr/sbin/uhubctl") else "uhubctl"
     action = "1" if enable else "0"
@@ -659,7 +790,6 @@ def start_hardware_scanner_listener(server_url: str, machine_code: str):
         return
 
     # Ensure physical USB 5V power to the MH-ET LIVE scanner is powered ON
-    print(f"\n{GREEN}{BOLD}[HARDWARE SCANNER]{RESET} Ensuring 5V USB power is ON (Always Ready to Scan)...", flush=True)
     set_scanner_hardware_power(True)
 
     def listener_loop():
@@ -693,44 +823,55 @@ def start_hardware_scanner_listener(server_url: str, machine_code: str):
                 print(f"\n{YELLOW}[1D BARCODE REJECTED] Scanned input '{scanned_str}' is a 1D barcode. Only 2D QR Codes are accepted.{RESET}", flush=True)
                 return
 
-            print(f"\n{GREEN}{BOLD}[QR SCANNED - READY TO SCAN]{RESET} Raw input: {scanned_str[:80]}", flush=True)
+            print(f"\n{GREEN}{BOLD}[QR SCANNED - READY TO SCAN]{RESET} Raw input: {scanned_str[:120]}", flush=True)
             pin = None
             order_id = None
             order_num = None
 
-            if scanned_str.startswith('{'):
+            if '{' in scanned_str and '}' in scanned_str:
+                start_i = scanned_str.find('{')
+                end_i = scanned_str.rfind('}') + 1
                 try:
-                    parsed = json.loads(scanned_str)
+                    parsed = json.loads(scanned_str[start_i:end_i])
                     pin = parsed.get('pin') or parsed.get('fourDigitPin')
                     order_id = parsed.get('orderId') or parsed.get('id')
                     order_num = parsed.get('orderNumber')
                 except Exception:
                     pass
 
-            if not pin and not order_id:
-                match = re.search(r'\b\d{4}\b', scanned_str)
-                if match:
-                    pin = match.group(0)
+            # Regex fallbacks if JSON parsing failed
+            if not pin:
+                pin_match = re.search(r'["\']?pin["\']?\s*:\s*["\']?(\d{4})["\']?', scanned_str, re.IGNORECASE)
+                if pin_match:
+                    pin = pin_match.group(1)
+                else:
+                    four_dig = re.search(r'\b\d{4}\b', scanned_str)
+                    if four_dig:
+                        pin = four_dig.group(0)
+
+            if not order_id:
+                uuid_match = re.search(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', scanned_str, re.IGNORECASE)
+                if uuid_match:
+                    order_id = uuid_match.group(1)
+
+            if not order_num:
+                ord_match = re.search(r'(ORD-[A-Za-z0-9_-]+)', scanned_str, re.IGNORECASE)
+                if ord_match:
+                    order_num = ord_match.group(1)
 
             if pin or order_id or order_num:
-                print(f"  {CYAN}[AUTO-TRIGGER]{RESET} Order target: PIN={pin}, OrderID={order_id}. Triggering print release...", flush=True)
+                print(f"  {CYAN}[AUTO-TRIGGER]{RESET} Order target: PIN={pin}, OrderID={order_id}, OrderNum={order_num}. Triggering print release...", flush=True)
                 trigger_pin_release(server_url, machine_code, pin=pin, order_id=order_id, order_number=order_num)
             else:
                 print(f"  {YELLOW}[SCANNER WARNING] Could not find PIN or Order in: {scanned_str}{RESET}", flush=True)
 
         while True:
-            devs = (
-                glob.glob('/dev/input/by-id/*Serial_To_HID*') or
-                glob.glob('/dev/input/by-id/*barcode*') or
-                glob.glob('/dev/input/by-id/*scanner*') or
-                glob.glob('/dev/input/event1')
-            )
-            if not devs:
+            dev_path = find_scanner_input_device()
+            if not dev_path:
                 time.sleep(1.0)
                 continue
 
-            dev_path = devs[0]
-            print(f"  {CYAN}[HARDWARE SCANNER]{RESET} Listening on {os.path.basename(dev_path)} (Ready to scan)...", flush=True)
+            print(f"  {GREEN}{BOLD}[HARDWARE SCANNER]{RESET} Listening on {dev_path} (Ready to scan)...", flush=True)
 
             try:
                 with open(dev_path, 'rb') as f:
@@ -873,7 +1014,8 @@ def main():
                     raw_duplex = str(job.get("duplexMode") or job.get("duplex_mode") or "").strip().lower()
                     is_duplex = bool(raw_duplex in ["duplex", "double", "two-sided", "both", "duplexnotumble"])
                     copies_count = max(1, int(job.get("copies") or 1))
-                    spool_ok, spool_msg = dispatch_to_printer(local_file, chosen_printer, args.print_real, is_physically_online, is_test_print=is_test_print, is_duplex=is_duplex, copies=copies_count)
+                    page_ranges = str(job.get("pageRanges") or job.get("page_ranges") or job.get("selected_page_ranges") or "all").strip()
+                    spool_ok, spool_msg = dispatch_to_printer(local_file, chosen_printer, args.print_real, is_physically_online, is_test_print=is_test_print, is_duplex=is_duplex, copies=copies_count, page_ranges=page_ranges)
                     time.sleep(0.5)
                     spool_color = GREEN if spool_ok else RED
                     print(f"  {BOLD}Hardware Spool:{RESET}{spool_color}[{'SUCCESS' if spool_ok else 'ALERT'}] {spool_msg}{RESET}", flush=True)

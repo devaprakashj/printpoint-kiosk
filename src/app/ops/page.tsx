@@ -501,6 +501,30 @@ export default function SmartPrintOpsConsole() {
     }
   };
 
+  // Action: Reprint Order (resets status + re-enqueues job to Pi daemon)
+  const handleReprintOrder = async (orderId: string, orderNum: string) => {
+    if (!confirm(`Re-send print job for Order ${orderNum} to the kiosk printer?\n\nThis will:\n• Reset order status to Ready-to-Print\n• Re-enqueue the file to the Pi daemon\n• Kiosk screen will show the order`)) return;
+    try {
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'reprint_order',
+          payload: { orderId },
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`Reprint sent! ${data.message || 'Pi daemon will print on next heartbeat.'}`);
+        fetchOpsData();
+      } else {
+        showToast(data.error || 'Reprint failed', 'error');
+      }
+    } catch {
+      showToast('Failed to trigger reprint', 'error');
+    }
+  };
+
   // Copy PIN to clipboard
   const handleCopyPin = (pin: string) => {
     navigator.clipboard.writeText(pin);
@@ -827,6 +851,7 @@ export default function SmartPrintOpsConsole() {
                 { name: 'Users', icon: Users, count: campusUsers.length },
                 { name: 'Printers', icon: Printer },
                 { name: 'Machines', icon: Monitor, count: machinesList.length },
+                { name: 'Pricing', icon: CreditCard },
                 { name: 'Licences', icon: Key },
                 { name: 'Payments', icon: CreditCard },
                 { name: 'Reports', icon: BarChart3 },
@@ -1441,9 +1466,11 @@ export default function SmartPrintOpsConsole() {
                                 <div className="font-mono font-bold text-slate-900 text-xs">
                                   ₹{((order.totalAmountPaise || 200) / 100).toFixed(2)}
                                 </div>
-                                <div className="text-[10px] text-emerald-700 font-medium flex items-center gap-0.5 mt-0.5">
-                                  <Check className="h-2.5 w-2.5" />
-                                  Paid
+                                <div className={`text-[10px] font-medium flex items-center gap-0.5 mt-0.5 ${
+                                  order.paymentStatus === 'paid' ? 'text-emerald-700' : 'text-amber-600'
+                                }`}>
+                                  {order.paymentStatus === 'paid' ? <Check className="h-2.5 w-2.5" /> : null}
+                                  {order.paymentStatus === 'paid' ? 'Paid' : (order.paymentStatus || 'Pending')}
                                 </div>
                               </td>
 
@@ -1492,9 +1519,9 @@ export default function SmartPrintOpsConsole() {
                                   )}
 
                                   <button
-                                    onClick={() => handleUpdateOrderStatus(order.id, 'paid_ready_to_print')}
-                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 font-medium cursor-pointer transition-colors shadow-2xs"
-                                    title="Reset order to queue"
+                                    onClick={() => handleReprintOrder(order.id, order.orderNumber)}
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 font-medium cursor-pointer transition-colors shadow-2xs"
+                                    title="Re-send print job to Pi daemon printer"
                                   >
                                     <RefreshCw className="h-2.5 w-2.5" />
                                     <span>Reprint</span>
@@ -2870,9 +2897,168 @@ export default function SmartPrintOpsConsole() {
             )}
 
             {/* ------------------------------------------------------------- */}
+            {/* TAB: PRICING MANAGEMENT                                        */}
+            {/* ------------------------------------------------------------- */}
+            {activeTab === 'Pricing' && (
+              <div className="space-y-4">
+                <div className="pb-1">
+                  <h1 className="text-xl font-bold text-slate-900 tracking-tight">Pricing Management</h1>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Set per-page print rates for campus kiosks. Changes apply instantly to the student upload portal.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {/* Live Pricing Rate Editor */}
+                  <form onSubmit={handleSavePricing} className="p-5 rounded-xl bg-white border border-slate-200 shadow-2xs space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h2 className="font-bold text-sm text-slate-900">Print Rate Configuration</h2>
+                      <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded font-medium">Live on Portal</span>
+                    </div>
+
+                    <div className="space-y-3 text-xs">
+                      <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 space-y-3">
+                        <p className="text-[11px] font-semibold text-slate-600 uppercase tracking-wide">Black &amp; White (Laser)</p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-slate-600 font-medium mb-1">Single-Sided (₹ per page)</label>
+                            <div className="flex items-center gap-1">
+                              <span className="text-slate-500 font-medium">₹</span>
+                              <input
+                                type="number"
+                                value={pricingForm.bwSinglePaise / 100}
+                                onChange={(e) => setPricingForm({ ...pricingForm, bwSinglePaise: Math.round(Number(e.target.value) * 100) })}
+                                step="0.5" min="0.5" max="50"
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-800 font-mono font-semibold focus:border-[#2563eb] focus:outline-none bg-white"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-slate-600 font-medium mb-1">Duplex/Both Sides (₹ per sheet)</label>
+                            <div className="flex items-center gap-1">
+                              <span className="text-slate-500 font-medium">₹</span>
+                              <input
+                                type="number"
+                                value={pricingForm.bwDuplexPaise / 100}
+                                onChange={(e) => setPricingForm({ ...pricingForm, bwDuplexPaise: Math.round(Number(e.target.value) * 100) })}
+                                step="0.5" min="0.5" max="50"
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-800 font-mono font-semibold focus:border-[#2563eb] focus:outline-none bg-white"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-3 rounded-lg bg-purple-50/50 border border-purple-200/70 space-y-3">
+                        <p className="text-[11px] font-semibold text-purple-700 uppercase tracking-wide">Color Print</p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-slate-600 font-medium mb-1">Single-Sided (₹ per page)</label>
+                            <div className="flex items-center gap-1">
+                              <span className="text-slate-500 font-medium">₹</span>
+                              <input
+                                type="number"
+                                value={pricingForm.colorSinglePaise / 100}
+                                onChange={(e) => setPricingForm({ ...pricingForm, colorSinglePaise: Math.round(Number(e.target.value) * 100) })}
+                                step="1" min="1" max="500"
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-purple-200 text-slate-800 font-mono font-semibold focus:border-purple-500 focus:outline-none bg-white"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-slate-600 font-medium mb-1">Duplex/Both Sides (₹ per sheet)</label>
+                            <div className="flex items-center gap-1">
+                              <span className="text-slate-500 font-medium">₹</span>
+                              <input
+                                type="number"
+                                value={pricingForm.colorDuplexPaise / 100}
+                                onChange={(e) => setPricingForm({ ...pricingForm, colorDuplexPaise: Math.round(Number(e.target.value) * 100) })}
+                                step="1" min="1" max="500"
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-purple-200 text-slate-800 font-mono font-semibold focus:border-purple-500 focus:outline-none bg-white"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-600 font-medium mb-1">Minimum Order Amount (₹)</label>
+                        <div className="flex items-center gap-1">
+                          <span className="text-slate-500 font-medium">₹</span>
+                          <input
+                            type="number"
+                            value={pricingForm.minimumOrderPaise / 100}
+                            onChange={(e) => setPricingForm({ ...pricingForm, minimumOrderPaise: Math.round(Number(e.target.value) * 100) })}
+                            step="0.5" min="1" max="100"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-800 font-mono font-semibold focus:border-[#2563eb] focus:outline-none"
+                          />
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">Minimum amount charged per print job regardless of page count</p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isSavingPricing}
+                      className="w-full py-2 rounded-lg bg-[#2563eb] hover:bg-blue-700 text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer"
+                    >
+                      {isSavingPricing ? 'Saving...' : '✓ Save Pricing — Apply to All Kiosks'}
+                    </button>
+                  </form>
+
+                  {/* Live Rate Preview Card */}
+                  <div className="space-y-3">
+                    <div className="p-5 rounded-xl bg-white border border-slate-200 shadow-2xs space-y-3">
+                      <h2 className="font-bold text-sm text-slate-900">Current Live Rates</h2>
+                      <p className="text-[11px] text-slate-400">Rates currently shown to students on the upload portal</p>
+
+                      <div className="space-y-2 text-xs">
+                        {[
+                          { label: 'B&W Single-Sided', value: pricingForm.bwSinglePaise / 100, unit: 'per page', color: 'slate' },
+                          { label: 'B&W Duplex (Both Sides)', value: pricingForm.bwDuplexPaise / 100, unit: 'per sheet', color: 'slate' },
+                          { label: 'Color Single-Sided', value: pricingForm.colorSinglePaise / 100, unit: 'per page', color: 'purple' },
+                          { label: 'Color Duplex (Both Sides)', value: pricingForm.colorDuplexPaise / 100, unit: 'per sheet', color: 'purple' },
+                          { label: 'Minimum Order', value: pricingForm.minimumOrderPaise / 100, unit: 'per job', color: 'blue' },
+                        ].map((item) => (
+                          <div key={item.label} className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0">
+                            <span className="text-slate-600 font-medium">{item.label}</span>
+                            <span className={`font-mono font-bold text-sm ${item.color === 'purple' ? 'text-purple-700' : item.color === 'blue' ? 'text-blue-700' : 'text-slate-900'}`}>
+                              ₹{item.value.toFixed(2)}
+                              <span className="text-[10px] font-normal text-slate-400 ml-1">{item.unit}</span>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Quick Calculation Example */}
+                    <div className="p-4 rounded-xl bg-blue-50 border border-blue-200 space-y-2 text-xs">
+                      <p className="font-semibold text-blue-900">💡 Example: 10-page document</p>
+                      <div className="space-y-1 text-blue-800">
+                        <div className="flex justify-between">
+                          <span>B&W Single: 10 × ₹{(pricingForm.bwSinglePaise / 100).toFixed(2)}</span>
+                          <span className="font-mono font-bold">= ₹{(10 * pricingForm.bwSinglePaise / 100).toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>B&W Duplex: 5 sheets × ₹{(pricingForm.bwDuplexPaise / 100).toFixed(2)}</span>
+                          <span className="font-mono font-bold">= ₹{(5 * pricingForm.bwDuplexPaise / 100).toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Color Single: 10 × ₹{(pricingForm.colorSinglePaise / 100).toFixed(2)}</span>
+                          <span className="font-mono font-bold">= ₹{(10 * pricingForm.colorSinglePaise / 100).toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ------------------------------------------------------------- */}
             {/* TAB 9: SETTINGS & PRICING CONFIGURATION                       */}
             {/* ------------------------------------------------------------- */}
             {activeTab === 'Settings' && (
+
               <div className="space-y-4">
                 <div className="pb-1">
                   <h1 className="text-xl font-bold text-slate-900 tracking-tight">Platform Settings</h1>

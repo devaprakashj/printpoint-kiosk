@@ -391,9 +391,122 @@ export async function POST(req: NextRequest) {
           .or(`id.eq.${orderId},order_number.eq.${orderId}`);
       }
 
+      // If status is being reset to paid_ready_to_print (for reprint), also set machine live state
+      if (status === 'paid_ready_to_print' && isSupabaseConfigured && supabaseAdmin) {
+        const { data: reprintOrder } = await supabaseAdmin
+          .from('orders')
+          .select('*')
+          .or(`id.eq.${orderId},order_number.eq.${orderId}`)
+          .single();
+        if (reprintOrder) {
+          const machineCode = reprintOrder.machine_code || 'RIT-ATM-01';
+          const liveOrder = {
+            id: reprintOrder.id,
+            orderNumber: reprintOrder.order_number,
+            fileName: reprintOrder.file_name,
+            pages: reprintOrder.calculated_print_pages || 1,
+            sheets: reprintOrder.calculated_sheets || 1,
+            copies: reprintOrder.copies || 1,
+            colorMode: reprintOrder.color_mode || 'bw',
+            duplexMode: reprintOrder.duplex_mode || 'simplex',
+            paperSize: reprintOrder.paper_size || 'A4',
+            fourDigitPin: reprintOrder.four_digit_pin,
+            amount: ((reprintOrder.total_amount_paise || 200) / 100).toFixed(2),
+            totalAmountPaise: reprintOrder.total_amount_paise || 200,
+            orderStatus: 'paid_ready_to_print',
+            releasedAt: new Date().toISOString(),
+          };
+          db.setMachineLiveActiveOrder(machineCode, liveOrder);
+        }
+      }
+
       const updated = db.updateOrderStatus(orderId, status);
       return NextResponse.json({ success: true, order: updated });
     }
+
+    if (action === 'reprint_order') {
+      // Full reprint: reset order status + re-enqueue print job to Pi hardware daemon
+      const { orderId } = payload;
+      const nowIso = new Date().toISOString();
+
+      let reprintOrder: any = null;
+
+      if (isSupabaseConfigured && supabaseAdmin) {
+        const { data } = await supabaseAdmin
+          .from('orders')
+          .select('*')
+          .or(`id.eq.${orderId},order_number.eq.${orderId}`)
+          .single();
+        reprintOrder = data;
+
+        if (reprintOrder) {
+          await supabaseAdmin
+            .from('orders')
+            .update({
+              order_status: 'paid_ready_to_print',
+              pin_used_at: null,
+            })
+            .eq('id', reprintOrder.id);
+        }
+      }
+
+      if (!reprintOrder) {
+        reprintOrder = db.getOrderById(orderId) || db.getOrders().find((o: any) => o.orderNumber === orderId);
+      }
+
+      if (!reprintOrder) {
+        return NextResponse.json({ success: false, error: 'Order not found' }, { status: 404 });
+      }
+
+      // Re-enqueue the actual hardware print job to the Pi daemon queue
+      const machineCode = (reprintOrder.machine_code || reprintOrder.machineCode || 'RIT-ATM-01').toUpperCase();
+      const jobPayload = {
+        orderId: reprintOrder.id,
+        orderNumber: reprintOrder.order_number || reprintOrder.orderNumber,
+        fileName: reprintOrder.file_name || reprintOrder.fileName || 'Document.pdf',
+        fileStorageUrl: reprintOrder.file_storage_url || reprintOrder.fileStorageUrl || '',
+        downloadUrl: reprintOrder.file_storage_url || reprintOrder.fileStorageUrl || '',
+        pages: reprintOrder.calculated_print_pages || reprintOrder.calculatedPrintPages || 1,
+        sheets: reprintOrder.calculated_sheets || reprintOrder.calculatedSheets || 1,
+        copies: reprintOrder.copies || 1,
+        colorMode: reprintOrder.color_mode || reprintOrder.colorMode || 'bw',
+        duplexMode: reprintOrder.duplex_mode || reprintOrder.duplexMode || 'simplex',
+        paperSize: reprintOrder.paper_size || reprintOrder.paperSize || 'A4',
+        pin: reprintOrder.four_digit_pin || reprintOrder.fourDigitPin,
+        isReprint: true,
+        releasedAt: nowIso,
+      };
+
+      db.enqueueHardwareJob(machineCode, jobPayload);
+      db.updateOrderStatus(orderId, 'paid_ready_to_print');
+
+      // Set kiosk live state so screen shows order
+      const liveOrder = {
+        id: reprintOrder.id,
+        orderNumber: reprintOrder.order_number || reprintOrder.orderNumber,
+        fileName: reprintOrder.file_name || reprintOrder.fileName,
+        pages: reprintOrder.calculated_print_pages || reprintOrder.calculatedPrintPages || 1,
+        sheets: reprintOrder.calculated_sheets || reprintOrder.calculatedSheets || 1,
+        copies: reprintOrder.copies || 1,
+        colorMode: reprintOrder.color_mode || reprintOrder.colorMode || 'bw',
+        duplexMode: reprintOrder.duplex_mode || reprintOrder.duplexMode || 'simplex',
+        paperSize: reprintOrder.paper_size || reprintOrder.paperSize || 'A4',
+        fourDigitPin: reprintOrder.four_digit_pin || reprintOrder.fourDigitPin,
+        amount: ((reprintOrder.total_amount_paise || reprintOrder.totalAmountPaise || 200) / 100).toFixed(2),
+        totalAmountPaise: reprintOrder.total_amount_paise || reprintOrder.totalAmountPaise || 200,
+        orderStatus: 'paid_ready_to_print',
+        releasedAt: nowIso,
+        isReprint: true,
+      };
+      db.setMachineLiveActiveOrder(machineCode, liveOrder);
+
+      return NextResponse.json({
+        success: true,
+        message: `Reprint job dispatched to ${machineCode}! Pi daemon will pick it up in the next heartbeat.`,
+        job: jobPayload,
+      });
+    }
+
 
     if (action === 'shred_order_file') {
       const { orderId } = payload;
