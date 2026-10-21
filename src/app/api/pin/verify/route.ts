@@ -76,28 +76,38 @@ export async function POST(req: NextRequest) {
           return NextResponse.json(
             { 
               success: false, 
+              alreadyUsed: true,
+              order: oData,
               error: `Security Alert: PIN #${cleanPin} has already been used and fulfilled. Single-use PINs cannot be reused.` 
             },
             { status: 400 }
           );
         }
-        if (oData.payment_status !== 'paid') {
+        // payment_status 'paid' is the correct column value after payment verification
+        // order_status can be 'paid_ready_to_print', 'printing', etc.
+        const isPaid = oData.payment_status === 'paid';
+        const isReadyOrPrinting = ['paid_ready_to_print', 'printing', 'created'].includes(oData.order_status || '');
+        if (!isPaid && !isReadyOrPrinting) {
           return NextResponse.json(
             { 
               success: false, 
-              error: `Payment is still pending for PIN #${cleanPin}. Please complete the payment on your mobile first.` 
+              error: `Payment is still pending for order #${oData.order_number || cleanPin}. Please complete the payment on your mobile first.` 
             },
             { status: 400 }
           );
         }
-        if (new Date(oData.pin_expires_at).getTime() <= Date.now()) {
-          return NextResponse.json(
-            { 
-              success: false, 
-              error: `PIN #${cleanPin} has expired (PINs are valid for 24 hours). Please generate a fresh print order.` 
-            },
-            { status: 400 }
-          );
+        // Only check expiry if pin_expires_at is actually set and valid
+        if (oData.pin_expires_at) {
+          const expiryTime = new Date(oData.pin_expires_at).getTime();
+          if (!isNaN(expiryTime) && expiryTime > 0 && expiryTime <= Date.now()) {
+            return NextResponse.json(
+              { 
+                success: false, 
+                error: `QR Pass has expired (valid for 24 hours from order time). Please generate a new print order.` 
+              },
+              { status: 400 }
+            );
+          }
         }
 
         const totalPaise = oData.total_amount_paise || 200;

@@ -62,6 +62,7 @@ export async function POST(req: NextRequest) {
             order_status: 'printing',
             payment_status: 'paid',
             pin_used_at: completedAt,
+            updated_at: completedAt,
           })
           .eq('id', oData.id);
 

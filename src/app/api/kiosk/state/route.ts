@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,8 +54,54 @@ export async function GET(req: NextRequest) {
     const cleanCode = String(machineCode).trim().toUpperCase();
 
     const state = kioskScreenStates[cleanCode];
-    const liveActiveOrder = db.getMachineLiveActiveOrder(cleanCode) || null;
+    let liveActiveOrder = db.getMachineLiveActiveOrder(cleanCode) || null;
     const scanAlert = db.getMachineLiveScanAlert(cleanCode) || null;
+
+    // ─── SUPABASE FALLBACK ─────────────────────────────────────────────────────
+    // On Vercel serverless, each request may hit a DIFFERENT container instance.
+    // Pi's /api/pin/release sets in-memory state in one container but the kiosk
+    // browser polls /api/kiosk/state hitting a different container → state is lost.
+    // Fix: query Supabase (shared DB) for recently scanned printing orders as the
+    // authoritative source across all serverless instances.
+    if (!liveActiveOrder && isSupabaseConfigured && supabaseAdmin) {
+      try {
+        const cutoffTime = new Date(Date.now() - 180000).toISOString(); // Last 3 minutes
+        const { data: recentOrder } = await supabaseAdmin
+          .from('orders')
+          .select('*')
+          .eq('machine_code', cleanCode)
+          .in('order_status', ['printing', 'paid_ready_to_print'])
+          .eq('payment_status', 'paid')
+          .gte('updated_at', cutoffTime) // Use updated_at as it's always set
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (recentOrder) {
+          const totalPaise = recentOrder.total_amount_paise || 200;
+          liveActiveOrder = {
+            id: recentOrder.id,
+            orderNumber: recentOrder.order_number,
+            fileName: recentOrder.file_name,
+            pages: recentOrder.calculated_print_pages || 1,
+            sheets: recentOrder.calculated_sheets || 1,
+            copies: recentOrder.copies || 1,
+            colorMode: recentOrder.color_mode || 'bw',
+            duplexMode: recentOrder.duplex_mode || 'simplex',
+            paperSize: recentOrder.paper_size || 'A4',
+            fourDigitPin: recentOrder.four_digit_pin,
+            amount: totalPaise % 100 === 0 ? `${totalPaise / 100}` : (totalPaise / 100).toFixed(2),
+            totalAmountPaise: totalPaise,
+            orderStatus: recentOrder.order_status,
+            releasedAt: recentOrder.pin_used_at || recentOrder.updated_at,
+          };
+          // Cache it in-memory to reduce DB polling on subsequent requests
+          db.setMachineLiveActiveOrder(cleanCode, liveActiveOrder);
+        }
+      } catch {
+        // Supabase query failed silently – UI will retry next poll
+      }
+    }
 
     // Default to active ready_to_scan for autonomous kiosk
     if (!state || Date.now() - state.updatedAt > 180000) {
@@ -83,3 +130,4 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: false, error }, { status: 500 });
   }
 }
+
