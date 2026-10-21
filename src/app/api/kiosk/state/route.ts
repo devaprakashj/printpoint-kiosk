@@ -70,10 +70,10 @@ export async function GET(req: NextRequest) {
           .from('orders')
           .select('*')
           .eq('machine_code', cleanCode)
-          .in('order_status', ['printing', 'paid_ready_to_print'])
-          .eq('payment_status', 'paid')
-          .gte('created_at', cutoffTime)
-          .order('created_at', { ascending: false })
+          .eq('order_status', 'printing')
+          .not('pin_used_at', 'is', null)
+          .gte('pin_used_at', cutoffTime)
+          .order('pin_used_at', { ascending: false })
           .limit(1)
           .maybeSingle();
 

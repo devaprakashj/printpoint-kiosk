@@ -251,6 +251,13 @@ class PrintAtmStore {
     if (!this.pendingHardwareJobs[code]) {
       this.pendingHardwareJobs[code] = [];
     }
+    // Prevent duplicate queuing of the same order
+    const alreadyQueued = this.pendingHardwareJobs[code].some(
+      (j) => (job.orderId && j.orderId === job.orderId) || (job.orderNumber && j.orderNumber === job.orderNumber)
+    );
+    if (alreadyQueued) {
+      return;
+    }
     this.pendingHardwareJobs[code].push({
       ...job,
       enqueuedAt: new Date().toISOString(),

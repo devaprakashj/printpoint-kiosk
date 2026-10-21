@@ -478,18 +478,20 @@ export default function AutonomousTouchscreenKiosk() {
     setPrintProgress(15);
     setPrintStep(1); // Preparing
 
-    // 1. Immediately enqueue job to Raspberry Pi daemon
+    // 1. Immediately enqueue job to Raspberry Pi daemon (only if not already printing)
     try {
-      await fetch('/api/pin/release', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          orderId: activeOrder?.id,
-          orderNumber: activeOrder?.orderNumber,
-          pin: activeOrder?.fourDigitPin,
-          machineCode,
-        }),
-      });
+      if (activeOrder?.orderStatus !== 'printing') {
+        await fetch('/api/pin/release', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            orderId: activeOrder?.id,
+            orderNumber: activeOrder?.orderNumber,
+            pin: activeOrder?.fourDigitPin,
+            machineCode,
+          }),
+        });
+      }
     } catch (e) {
       console.warn('Release request dispatch warning:', e);
     }

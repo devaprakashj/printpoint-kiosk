@@ -56,13 +56,15 @@ export async function POST(req: NextRequest) {
 
         order = oData;
 
+        const isAlreadyPrinting = oData.order_status === 'printing';
+
         // Set PIN as active/printing and used (Do not shred storage file yet; file is shredded upon hardware job-ack confirmation)
         const { error: updateOrderErr } = await supabaseAdmin
           .from('orders')
           .update({
             order_status: 'printing',
             payment_status: 'paid',
-            pin_used_at: completedAt,
+            pin_used_at: oData.pin_used_at || completedAt,
           })
           .eq('id', oData.id);
 
@@ -70,8 +72,8 @@ export async function POST(req: NextRequest) {
           console.error('[PIN RELEASE] Failed to update order status in Supabase:', updateOrderErr);
         }
 
-        // Decrement machine paper count in Supabase
-        if (targetMachineCode) {
+        // Decrement machine paper count in Supabase (only once per order)
+        if (targetMachineCode && !isAlreadyPrinting) {
           const { data: mData } = await supabaseAdmin
             .from('machines')
             .select('current_sheets_remaining')
