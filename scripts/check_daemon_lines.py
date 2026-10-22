@@ -1,17 +1,18 @@
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
 import paramiko
 
 client = paramiko.SSHClient()
 client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 client.connect('172.15.28.232', username='ritadmin', password='adminadmin', timeout=5)
 
-cmd = """python3 -c "
-with open('/home/ritadmin/printpoint-kiosk/smartprint_daemon.py') as f:
-    lines = f.readlines()
-for i, l in enumerate(lines):
-    if 'def main()' in l or 'start_hardware_scanner_listener' in l:
-        print(f'{i+1}: {l.strip()}')
-"
-"""
-stdin, stdout, stderr = client.exec_command(cmd)
-print(stdout.read().decode())
-print(stderr.read().decode())
+stdin, stdout, stderr = client.exec_command('wc -l /home/ritadmin/printpoint-kiosk/daemon.log')
+print('wc -l:', stdout.read().decode('utf-8', errors='ignore'))
+
+stdin, stdout, stderr = client.exec_command('sed -n "550,575p" /home/ritadmin/printpoint-kiosk/daemon.log')
+print('lines around 556:\n', stdout.read().decode('utf-8', errors='ignore'))
+
+stdin, stdout, stderr = client.exec_command('tail -n 20 /home/ritadmin/printpoint-kiosk/daemon.log')
+print('tail:\n', stdout.read().decode('utf-8', errors='ignore'))
+
+client.close()
