@@ -24,6 +24,24 @@ import re
 import glob
 import struct
 import threading
+import asyncio
+
+try:
+    import websockets
+except ImportError:
+    websockets = None
+
+try:
+    import serial
+except ImportError:
+    serial = None
+
+# Global Concurrency & WebSocket State
+WS_CONNECTED_CLIENTS = set()
+WS_EVENT_LOOP = None
+WS_SERVER_RUNNING = False
+IS_BUSY = False
+BUSY_LOCK = threading.Lock()
 
 # Force line-buffering and UTF-8 with errors='replace' so emoji never crashes Windows cp1252 consoles
 if hasattr(sys.stdout, "reconfigure"):
@@ -580,7 +598,7 @@ def slice_pdf_to_pages(input_pdf: str, page_ranges: str) -> tuple[str, bool]:
     return input_pdf, False
 
 
-def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_physically_online: bool, is_test_print: bool = False, is_duplex: bool = False, copies: int = 1, page_ranges: str = "all") -> tuple[bool, str]:
+def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_physically_online: bool, is_test_print: bool = False, is_duplex: bool = False, copies: int = 1, page_ranges: str = "all", progress_callback=None) -> tuple[bool, str]:
     """
     Dispatches file to target printer spooler.
     Checks physical connectivity before attempting hardware paper feed.
@@ -652,9 +670,6 @@ def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_p
                     temp_sliced_file = sliced_path
 
             # Smart Duplex Imposition for 1-page documents with multiple copies:
-            # CUPS duplex only applies across multiple pages within a single document stream.
-            # If user has a 1-page file and selected 2 copies + Duplex, merge the page into a 2-page PDF
-            # so Kyocera feeds and prints front & back on 1 single physical sheet!
             if is_duplex and actual_copies >= 2 and print_file.lower().endswith(".pdf"):
                 page_cnt = get_pdf_page_count(print_file)
                 if page_cnt == 1:
@@ -667,8 +682,6 @@ def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_p
                         print_file = merged_duplex_file
                         actual_copies = max(1, duplex_pairs)
 
-            # -c: CRITICAL - forces CUPS to copy the file to its internal spool immediately
-            # so that subsequent DoD shredding of local_file does not destroy the file while CUPS filters it!
             all_spool_msgs = []
             for copy_idx in range(1, actual_copies + 1):
                 if actual_copies > 1:
@@ -695,15 +708,16 @@ def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_p
                     # Wait up to 60 seconds for CUPS to confirm physical job completion
                     for sec in range(60):
                         time.sleep(1.0)
+                        if progress_callback:
+                            current_progress = min(96, 50 + int((sec / 15.0) * 45))
+                            progress_callback(current_progress, 3)
 
-                        # 1. Check if job is listed in CUPS completed history
                         completed_stat = subprocess.run(['lpstat', '-W', 'completed', '-o', printer_name], capture_output=True, text=True).stdout
                         if job_id in completed_stat:
                             confirmed_complete = True
                             print(f"  {GREEN}[CUPS HARDWARE CONFIRMED]{RESET} Job {job_id} reached completed state in {sec+1}s", flush=True)
                             break
 
-                        # 2. Check active status specifically for THIS job_id
                         job_stat = subprocess.run(['lpstat', '-l', job_id], capture_output=True, text=True).stdout
                         if job_stat:
                             lower_js = job_stat.lower()
@@ -723,6 +737,9 @@ def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_p
 
                 all_spool_msgs.append(cups_out)
 
+            if progress_callback:
+                progress_callback(100, 4)
+
             return True, f"Sent to CUPS -> [{printer_name}] ({', '.join(all_spool_msgs)}) [Hardware Confirmed: {actual_copies} copy/copies]"
         except Exception as e:
             return False, f"CUPS error: {e}"
@@ -736,33 +753,354 @@ def dispatch_to_printer(filepath: str, printer_name: str, print_real: bool, is_p
     return True, f"Dispatched to [{printer_name}]"
 
 
-def trigger_pin_release(server_url: str, machine_code: str, pin: str = None, order_id: str = None, order_number: str = None):
-    """Calls Next.js API /api/pin/release to verify and release the order into the print queue."""
-    url = f"{server_url.rstrip('/')}/api/pin/release"
-    payload = {"machineCode": machine_code}
-    if pin:
-        payload["pin"] = str(pin).strip()
-    if order_id:
-        payload["orderId"] = str(order_id).strip()
-    if order_number:
-        payload["orderNumber"] = str(order_number).strip()
+def broadcast_ws(payload: dict):
+    """Thread-safe WebSocket broadcaster to all connected Chromium kiosk clients."""
+    global WS_CONNECTED_CLIENTS, WS_EVENT_LOOP
+    if not WS_CONNECTED_CLIENTS or not WS_EVENT_LOOP:
+        return
+    try:
+        msg_str = json.dumps(payload)
+        async def _send():
+            dead = set()
+            for ws in list(WS_CONNECTED_CLIENTS):
+                try:
+                    await ws.send(msg_str)
+                except Exception:
+                    dead.add(ws)
+            WS_CONNECTED_CLIENTS.difference_update(dead)
+        asyncio.run_coroutine_threadsafe(_send(), WS_EVENT_LOOP)
+    except Exception:
+        pass
+
+
+def start_local_websocket_server(host="127.0.0.1", port=8765, server_url="", machine_code="", printer_name="", print_real=False):
+    """Starts local async WebSocket server on ws://127.0.0.1:8765 for real-time kiosk browser UI events."""
+    global WS_EVENT_LOOP, WS_SERVER_RUNNING
+    if WS_SERVER_RUNNING or not websockets:
+        return
+    WS_SERVER_RUNNING = True
+
+    def run_ws_loop():
+        global WS_EVENT_LOOP
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        WS_EVENT_LOOP = loop
+
+        async def handle_client(websocket):
+            WS_CONNECTED_CLIENTS.add(websocket)
+            print(f"  {GREEN}[LOCAL WS BRIDGE] Kiosk Chromium connected on ws://{host}:{port}{RESET}", flush=True)
+            try:
+                async for raw_msg in websocket:
+                    try:
+                        data = json.loads(raw_msg)
+                        msg_type = data.get("type")
+                        if msg_type == "TRIGGER_RELEASE":
+                            print(f"  {CYAN}[WS TRIGGER] UI requested print release for {data.get('orderNumber')}{RESET}", flush=True)
+                            threading.Thread(
+                                target=execute_order_print_flow,
+                                args=(data, server_url, machine_code, printer_name, print_real),
+                                daemon=True
+                            ).start()
+                    except Exception as me:
+                        print(f"  {YELLOW}[WS PARSE ERROR] {me}{RESET}", flush=True)
+            except Exception:
+                pass
+            finally:
+                WS_CONNECTED_CLIENTS.discard(websocket)
+                print(f"  {YELLOW}[LOCAL WS BRIDGE] Kiosk Chromium disconnected{RESET}", flush=True)
+
+        async def start_server():
+            async with websockets.serve(handle_client, host, port):
+                print(f"  {GREEN}{BOLD}[LOCAL WS BRIDGE]{RESET} Running on ws://{host}:{port} (Ready for Chromium Kiosk)", flush=True)
+                await asyncio.Future()
+
+        try:
+            loop.run_until_complete(start_server())
+        except Exception as e:
+            print(f"  {RED}[LOCAL WS ERROR] {e}{RESET}", flush=True)
+
+    t = threading.Thread(target=run_ws_loop, daemon=True, name="LocalWebSocketBridge")
+    t.start()
+
+
+def map_verify_error_to_tamil(error_msg: str) -> tuple[str, str]:
+    """Maps Next.js backend error string to user-friendly alertType and Tamil explanation."""
+    err_low = str(error_msg).lower()
+    if any(x in err_low for x in ["already used", "already fulfilled", "single-use", "reused"]):
+        return "ALREADY_USED", "இந்த QR பாஸ் ஏற்கனவே பயன்படுத்தப்பட்டுவிட்டது! மறுமுறை பயன்படுத்த முடியாது."
+    elif "expired" in err_low:
+        return "EXPIRED", "இந்த கியூஆர் பாஸின் காலாவதி நேரம் முடிந்துவிட்டது. புதிய ஆர்டரை உருவாக்கவும்."
+    elif any(x in err_low for x in ["payment is still pending", "pending payment", "complete the payment"]):
+        return "PAYMENT_PENDING", "இந்த ஆர்டருக்கான கட்டணம் நிலுவையில் உள்ளது. மொபைலில் பணத்தை செலுத்திவிட்டு முயற்சிக்கவும்."
+    elif any(x in err_low for x in ["offline", "maintenance", "powered off"]):
+        return "MACHINE_OFFLINE", "இந்த கியோஸ்க் தற்போது ஆஃப்லைனில் உள்ளது. வேறு ஆன்லைன் கியோஸ்க்கில் பிரிண்ட் எடுக்கலாம்."
+    elif "paper" in err_low and ("empty" in err_low or "out" in err_low):
+        return "PAPER_EMPTY", "கியோஸ்க்கில் பேப்பர் தீர்ந்துவிட்டது. நிர்வாகி பேப்பர் வைக்கும் வரை காத்திருக்கவும்."
+    else:
+        return "SCAN_ERROR", "தவறான கியூஆர் கோடு. தயவுசெய்து உங்கள் ரசீதில் உள்ள கியூஆரை ஸ்கேன் செய்யவும்."
+
+
+def execute_order_print_flow(order_or_job: dict, server_url: str, machine_code: str, printer_name: str, print_real: bool):
+    """
+    Executes full touchless printing workflow:
+    1. Concurrency lock (prevents dual scans from corrupting jobs)
+    2. Atomic /api/pin/release claim
+    3. Streams PRINT_PROGRESS to WebSocket
+    4. Downloads document to private local spool
+    5. Dispatches to Kyocera via CUPS with exact copies, duplex, and page ranges
+    6. Tracks CUPS hardware completion
+    7. Streams PRINT_COMPLETE to Kiosk UI (8s collection countdown)
+    8. DoD 5220.22-M zero-wipe shredder
+    9. Reports cloud ACK and auto-resets UI to Ready to Scan
+    """
+    global IS_BUSY, BUSY_LOCK
+    with BUSY_LOCK:
+        IS_BUSY = True
 
     try:
+        order_id = order_or_job.get("id") or order_or_job.get("orderId") or ""
+        order_num = order_or_job.get("orderNumber") or "ORD-UNKNOWN"
+        pin_code = str(order_or_job.get("fourDigitPin") or order_or_job.get("pin") or "")
+        file_name = order_or_job.get("fileName") or "Document.pdf"
+        download_url = order_or_job.get("downloadUrl") or order_or_job.get("fileStorageUrl") or ""
+
+        # Step 1: Claim order via /api/pin/release
+        broadcast_ws({"type": "PRINT_PROGRESS", "progress": 15, "step": 1})
+
+        rel_url = f"{server_url.rstrip('/')}/api/pin/release"
+        rel_payload = {
+            "machineCode": machine_code,
+            "orderId": order_id,
+            "orderNumber": order_num,
+            "pin": pin_code
+        }
+        rel_data = {}
+        try:
+            req = urllib.request.Request(
+                rel_url,
+                data=json.dumps(rel_payload).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": "SmartPrint-Pi5-Daemon/2.4"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                rel_data = json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            print(f"  {YELLOW}[RELEASE NOTICE] /api/pin/release response: {e}{RESET}", flush=True)
+
+        job_info = rel_data.get("job") or {}
+        if job_info:
+            download_url = job_info.get("downloadUrl") or download_url
+            file_name = job_info.get("fileName") or file_name
+            order_id = job_info.get("orderId") or order_id
+            order_num = job_info.get("orderNumber") or order_num
+            pin_code = str(job_info.get("pin") or pin_code)
+
+        pages_count = max(1, int(job_info.get("pages") or order_or_job.get("calculatedPrintPages") or order_or_job.get("pages") or 1))
+        copies_count = max(1, int(job_info.get("copies") or order_or_job.get("copies") or 1))
+        raw_duplex = str(job_info.get("duplexMode") or order_or_job.get("duplexMode") or "").strip().lower()
+        is_duplex = bool(raw_duplex in ["duplex", "double", "two-sided", "both", "duplexnotumble"])
+        page_ranges = str(job_info.get("pageRanges") or order_or_job.get("selectedPageRanges") or "all").strip()
+
+        print(f"\n{GREEN}{BOLD}================================================================{RESET}", flush=True)
+        print(f"{GREEN}{BOLD}   [*] EXECUTING PRINT JOB: {order_num}                        {RESET}", flush=True)
+        print(f"{GREEN}{BOLD}================================================================{RESET}")
+        print(f"  {BOLD}Document:{RESET}       {file_name}", flush=True)
+        print(f"  {BOLD}Pages / Copy:{RESET}   {pages_count} pages | {copies_count} copy/copies | Page Range: {page_ranges}", flush=True)
+        print(f"  {BOLD}Duplex Mode:{RESET}    {'DUPLEX (Two-Sided)' if is_duplex else 'SIMPLEX (Single-Sided)'}", flush=True)
+
+        # Step 2: Download document
+        broadcast_ws({"type": "PRINT_PROGRESS", "progress": 30, "step": 1})
+        is_blank_order = ('blank' in file_name.lower()) or ('blank' in str(order_num).lower())
+        local_file, file_bytes = download_job_file(server_url, download_url, order_num, file_name, pages_count=pages_count)
+        print(f"  {BOLD}Spool File:{RESET}     {GREEN}[OK] {file_bytes:,} bytes → {os.path.basename(local_file)}{RESET}", flush=True)
+
+        # Step 3: Spooling to printer
+        broadcast_ws({"type": "PRINT_PROGRESS", "progress": 45, "step": 2})
+
+        detected = detect_connected_printers(printer_name)
+        target_printer = printer_name or "Kyocera_3212i"
+        is_online = True
+        chosen_port = "CUPS/Network"
+        if detected:
+            match = next((p for p in detected if target_printer.lower() in p["name"].lower()), detected[0])
+            target_printer = match["name"]
+            is_online = match.get("connected", True)
+            chosen_port = match.get("port", "CUPS/Network")
+
+        print(f"  {BOLD}Printer Target:{RESET} {YELLOW}{target_printer}{RESET} [{chosen_port}]", flush=True)
+
+        def on_cups_progress(pct, step):
+            broadcast_ws({"type": "PRINT_PROGRESS", "progress": pct, "step": step})
+
+        if is_blank_order:
+            is_duplex = False
+            page_ranges = "all"
+            copies_count = 1
+
+        spool_ok, spool_msg = dispatch_to_printer(
+            local_file, target_printer, print_real, is_online,
+            is_test_print=False, is_duplex=is_duplex, copies=copies_count,
+            page_ranges=page_ranges, progress_callback=on_cups_progress
+        )
+
+        if spool_ok:
+            # Step 4: Complete
+            broadcast_ws({"type": "PRINT_COMPLETE", "progress": 100, "step": 4})
+            report_job_ack(server_url, order_id, order_num, pin_code, True, spool_msg)
+            wiped_bytes = dod_5220_shred_file(local_file)
+            print(f"  {BOLD}Privacy Shred:{RESET}  {GREEN}DoD 5220.22-M Zero-Wipe Verified: {wiped_bytes:,} bytes shredded (0 Bytes Left on Disk){RESET}", flush=True)
+            print(f"{GREEN}{BOLD}================================================================{RESET}\n", flush=True)
+
+            # Wait 8s for customer collection countdown (matches UI screen)
+            time.sleep(8.0)
+            broadcast_ws({"type": "RESET_TO_READY"})
+        else:
+            broadcast_ws({
+                "type": "SCAN_ALERT",
+                "alertType": "PRINT_ERROR",
+                "error": f"Printer Spool Error: {spool_msg}",
+                "tamilMessage": "பிரிண்ட் செய்வதில் பிழை ஏற்பட்டது. தயவுசெய்து கியோஸ்க் நிர்வாகியை அணுகவும்."
+            })
+            report_job_ack(server_url, order_id, order_num, pin_code, False, spool_msg)
+            dod_5220_shred_file(local_file)
+            time.sleep(7.0)
+            broadcast_ws({"type": "RESET_TO_READY"})
+
+    except Exception as e:
+        print(f"  {RED}[PRINT FLOW ERROR] {e}{RESET}", flush=True)
+        broadcast_ws({
+            "type": "SCAN_ALERT",
+            "alertType": "PRINT_ERROR",
+            "error": str(e),
+            "tamilMessage": "பிரிண்ட் செய்வதில் எதிர்பாராத பிழை ஏற்பட்டது."
+        })
+        time.sleep(7.0)
+        broadcast_ws({"type": "RESET_TO_READY"})
+    finally:
+        with BUSY_LOCK:
+            IS_BUSY = False
+
+
+def process_scanned_string(scanned_str: str, server_url: str, machine_code: str, printer_name: str, print_real: bool):
+    """Processes an optical QR scan event from MH-ET LIVE scanner."""
+    global IS_BUSY, BUSY_LOCK
+    scanned_str = scanned_str.strip()
+    if not scanned_str:
+        return
+
+    # Filter 1D linear product barcodes
+    if re.match(r'^\d{8,14}$', scanned_str):
+        print(f"\n{YELLOW}[1D BARCODE REJECTED] Scanned input '{scanned_str}' is a 1D barcode. Only 2D QR Codes are accepted.{RESET}", flush=True)
+        return
+
+    with BUSY_LOCK:
+        if IS_BUSY:
+            print(f"\n{YELLOW}[BUSY] Scan ignored: Kiosk currently processing another job.{RESET}", flush=True)
+            broadcast_ws({
+                "type": "BUSY_ALERT",
+                "message": "Kiosk is currently printing. Please wait for paper to exit.",
+                "tamilMessage": "மெஷின் தற்போது பிரிண்ட் செய்து கொண்டிருக்கிறது. தயவுசெய்து காத்திருக்கவும்."
+            })
+            return
+
+    print(f"\n{GREEN}{BOLD}[QR SCANNED - READY TO SCAN]{RESET} Raw input: {scanned_str[:120]}", flush=True)
+    # Immediately shift UI to Verifying Order
+    broadcast_ws({"type": "SCAN_START"})
+
+    pin = None
+    order_id = None
+    order_num = None
+
+    if '{' in scanned_str and '}' in scanned_str:
+        start_i = scanned_str.find('{')
+        end_i = scanned_str.rfind('}') + 1
+        try:
+            parsed = json.loads(scanned_str[start_i:end_i])
+            pin = parsed.get('pin') or parsed.get('fourDigitPin')
+            order_id = parsed.get('orderId') or parsed.get('id')
+            order_num = parsed.get('orderNumber')
+        except Exception:
+            pass
+
+    if not pin:
+        pin_match = re.search(r'["\']?pin["\']?\s*:\s*["\']?(\d{4})["\']?', scanned_str, re.IGNORECASE)
+        if pin_match:
+            pin = pin_match.group(1)
+        else:
+            four_dig = re.search(r'\b\d{4}\b', scanned_str)
+            if four_dig:
+                pin = four_dig.group(0)
+
+    if not order_id:
+        uuid_match = re.search(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', scanned_str, re.IGNORECASE)
+        if uuid_match:
+            order_id = uuid_match.group(1)
+
+    if not order_num:
+        ord_match = re.search(r'(ORD-[A-Za-z0-9_-]+)', scanned_str, re.IGNORECASE)
+        if ord_match:
+            order_num = ord_match.group(1)
+
+    # Call /api/pin/verify
+    verify_url = f"{server_url.rstrip('/')}/api/pin/verify"
+    v_payload = {
+        "machineCode": machine_code,
+        "qrData": scanned_str,
+        "pin": pin,
+        "orderId": order_id,
+        "orderNumber": order_num
+    }
+    try:
         req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json", "User-Agent": "SmartPrint-Pi5-Scanner/2.4"},
+            verify_url,
+            data=json.dumps(v_payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": "SmartPrint-Pi5-Daemon/2.4"},
             method="POST"
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            if data.get("success"):
-                label = pin or order_id or order_number or "QR Pass"
-                print(f"\n{GREEN}{BOLD}[SCANNER SUCCESS] Order released for {label}! Printing will commence on next pulse...{RESET}", flush=True)
-            else:
-                print(f"\n{YELLOW}[SCANNER NOTICE] Verify returned: {data.get('error', 'unknown error')}{RESET}", flush=True)
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            v_data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as he:
+        try:
+            v_data = json.loads(he.read().decode("utf-8"))
+        except Exception:
+            v_data = {"success": False, "error": f"HTTP {he.code}: {he.reason}"}
     except Exception as e:
-        print(f"\n{RED}[SCANNER ERROR] Failed to release order: {e}{RESET}", flush=True)
+        v_data = {"success": False, "error": f"Connection error: {e}"}
+
+    if not v_data.get("success"):
+        err_msg = v_data.get("error") or "Order verification failed"
+        alert_type, tamil_msg = map_verify_error_to_tamil(err_msg)
+        print(f"  {RED}[VERIFY FAILED] {err_msg}{RESET}", flush=True)
+        broadcast_ws({
+            "type": "SCAN_ALERT",
+            "alertType": alert_type,
+            "error": err_msg,
+            "tamilMessage": tamil_msg,
+            "orderNumber": order_num or "",
+            "fileName": ""
+        })
+        time.sleep(7.0)
+        broadcast_ws({"type": "RESET_TO_READY"})
+        return
+
+    # Order verified successfully!
+    verified_order = v_data.get("order") or {}
+    print(f"  {GREEN}{BOLD}[ORDER VERIFIED]{RESET} {verified_order.get('orderNumber')} | {verified_order.get('fileName')}", flush=True)
+
+    with BUSY_LOCK:
+        IS_BUSY = True
+
+    # Transition UI to Order Details (triggers 3s auto countdown)
+    broadcast_ws({
+        "type": "ORDER_VERIFIED",
+        "order": verified_order
+    })
+
+    # Countdown wait for non-touchscreen display
+    time.sleep(3.2)
+
+    # Commencing real printing
+    execute_order_print_flow(verified_order, server_url, machine_code, printer_name, print_real)
 
 
 def check_is_kiosk_scanner_active(server_url: str, machine_code: str) -> tuple[bool, str]:
@@ -779,7 +1117,6 @@ def check_is_kiosk_scanner_active(server_url: str, machine_code: str) -> tuple[b
 
 def find_scanner_input_device() -> str | None:
     """Finds the real physical USB barcode/QR scanner event device dynamically."""
-    # 1. Search /dev/input/by-id/ for known scanner signatures
     by_id_matches = (
         glob.glob('/dev/input/by-id/*Serial_To_HID*') or
         glob.glob('/dev/input/by-id/*barcode*') or
@@ -792,7 +1129,6 @@ def find_scanner_input_device() -> str | None:
             if os.path.exists(p):
                 return os.path.realpath(p)
 
-    # 2. Check /proc/bus/input/devices for "Serial To HID" or Vendor 1a86:e026
     try:
         if os.path.exists('/proc/bus/input/devices'):
             with open('/proc/bus/input/devices', 'r') as f:
@@ -801,7 +1137,6 @@ def find_scanner_input_device() -> str | None:
             for b in blocks:
                 b_low = b.lower()
                 if any(x in b_low for x in ['serial to hid', '1a86', 'e026', 'barcode', 'qr scanner', 'scanner']):
-                    # Skip HDMI or CEC or power button
                     if any(ign in b_low for ign in ['hdmi', 'pwr_button', 'vc4']):
                         continue
                     m = re.search(r'Handlers=.*?(event\d+)', b)
@@ -819,7 +1154,6 @@ def set_scanner_hardware_power(enable: bool = True) -> bool:
     """Powers ON physical 5V USB power to MH-ET LIVE scanner via uhubctl on Raspberry Pi 5 if not already active."""
     if platform.system() != "Linux":
         return True
-    # If scanner device is ALREADY discovered, do NOT power-cycle (it causes a 15-second USB renegotiation)
     if enable and find_scanner_input_device():
         return True
     uhubctl_bin = "/usr/sbin/uhubctl" if os.path.exists("/usr/sbin/uhubctl") else "uhubctl"
@@ -832,16 +1166,45 @@ def set_scanner_hardware_power(enable: bool = True) -> bool:
         return False
 
 
-def start_hardware_scanner_listener(server_url: str, machine_code: str):
+def start_serial_scanner_listener(server_url: str, machine_code: str, printer_name: str, print_real: bool):
+    """Background listener for MH-ET LIVE scanner when running in USB-Serial (CDC-ACM) mode."""
+    if not serial:
+        return
+
+    def serial_loop():
+        while True:
+            candidates = glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*")
+            if not candidates:
+                time.sleep(2.0)
+                continue
+            port = candidates[0]
+            try:
+                with serial.Serial(port, baudrate=9600, timeout=0.2) as ser:
+                    print(f"  {GREEN}{BOLD}[SERIAL SCANNER]{RESET} Listening on {port} (9600 baud)...", flush=True)
+                    while True:
+                        line = ser.readline().decode('utf-8', errors='replace').strip()
+                        if line:
+                            threading.Thread(
+                                target=process_scanned_string,
+                                args=(line, server_url, machine_code, printer_name, print_real),
+                                daemon=True
+                            ).start()
+            except Exception:
+                time.sleep(2.0)
+
+    t = threading.Thread(target=serial_loop, daemon=True, name="SerialScannerListener")
+    t.start()
+
+
+def start_hardware_scanner_listener(server_url: str, machine_code: str, printer_name: str = "", print_real: bool = False):
     """Starts background listener that captures HID scanner events (24/7 Always Ready to Scan)."""
     if platform.system() != "Linux":
         return
 
-    # Ensure physical USB 5V power to the MH-ET LIVE scanner is powered ON
     set_scanner_hardware_power(True)
+    start_serial_scanner_listener(server_url, machine_code, printer_name, print_real)
 
     def listener_loop():
-        # Complete Linux EV_KEY decoding table (Top row + Keypad + Punctuation)
         KEY_MAP = {
             2: '1', 3: '2', 4: '3', 5: '4', 6: '5', 7: '6', 8: '7', 9: '8', 10: '9', 11: '0',
             28: '\n', 96: '\n', 15: '\t', 57: ' ',
@@ -850,7 +1213,6 @@ def start_hardware_scanner_listener(server_url: str, machine_code: str):
             44: 'z', 45: 'x', 46: 'c', 47: 'v', 48: 'b', 49: 'n', 50: 'm',
             52: '.', 53: '/', 12: '-', 13: '=', 26: '[', 27: ']', 39: ';', 40: "'", 43: '\\',
             51: ',', 14: '',
-            # Keypad numbers (used by barcode scanners in keypad mode)
             79: '1', 80: '2', 81: '3', 75: '4', 76: '5', 77: '6', 71: '7', 72: '8', 73: '9', 82: '0',
             74: '-', 78: '+', 83: '.', 98: '/'
         }
@@ -860,58 +1222,6 @@ def start_hardware_scanner_listener(server_url: str, machine_code: str):
         }
 
         import select
-
-        def process_scanned_string(scanned_str: str):
-            scanned_str = scanned_str.strip()
-            if not scanned_str:
-                return
-
-            # Filter 1: Reject 1D linear product barcodes (8-14 pure digits)
-            if re.match(r'^\d{8,14}$', scanned_str):
-                print(f"\n{YELLOW}[1D BARCODE REJECTED] Scanned input '{scanned_str}' is a 1D barcode. Only 2D QR Codes are accepted.{RESET}", flush=True)
-                return
-
-            print(f"\n{GREEN}{BOLD}[QR SCANNED - READY TO SCAN]{RESET} Raw input: {scanned_str[:120]}", flush=True)
-            pin = None
-            order_id = None
-            order_num = None
-
-            if '{' in scanned_str and '}' in scanned_str:
-                start_i = scanned_str.find('{')
-                end_i = scanned_str.rfind('}') + 1
-                try:
-                    parsed = json.loads(scanned_str[start_i:end_i])
-                    pin = parsed.get('pin') or parsed.get('fourDigitPin')
-                    order_id = parsed.get('orderId') or parsed.get('id')
-                    order_num = parsed.get('orderNumber')
-                except Exception:
-                    pass
-
-            # Regex fallbacks if JSON parsing failed
-            if not pin:
-                pin_match = re.search(r'["\']?pin["\']?\s*:\s*["\']?(\d{4})["\']?', scanned_str, re.IGNORECASE)
-                if pin_match:
-                    pin = pin_match.group(1)
-                else:
-                    four_dig = re.search(r'\b\d{4}\b', scanned_str)
-                    if four_dig:
-                        pin = four_dig.group(0)
-
-            if not order_id:
-                uuid_match = re.search(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', scanned_str, re.IGNORECASE)
-                if uuid_match:
-                    order_id = uuid_match.group(1)
-
-            if not order_num:
-                ord_match = re.search(r'(ORD-[A-Za-z0-9_-]+)', scanned_str, re.IGNORECASE)
-                if ord_match:
-                    order_num = ord_match.group(1)
-
-            if pin or order_id or order_num:
-                print(f"  {CYAN}[AUTO-TRIGGER]{RESET} Order target: PIN={pin}, OrderID={order_id}, OrderNum={order_num}. Triggering print release...", flush=True)
-                trigger_pin_release(server_url, machine_code, pin=pin, order_id=order_id, order_number=order_num)
-            else:
-                print(f"  {YELLOW}[SCANNER WARNING] Could not find PIN or Order in: {scanned_str}{RESET}", flush=True)
 
         while True:
             dev_path = find_scanner_input_device()
@@ -926,13 +1236,16 @@ def start_hardware_scanner_listener(server_url: str, machine_code: str):
                     chars = []
                     is_shift = False
                     while True:
-                        # Wait up to 150ms for events. If characters arrived and then stopped for 150ms, flush buffer!
                         r, _, _ = select.select([f], [], [], 0.15)
                         if not r:
                             if len(chars) >= 4:
                                 s = "".join(chars)
                                 chars = []
-                                process_scanned_string(s)
+                                threading.Thread(
+                                    target=process_scanned_string,
+                                    args=(s, server_url, machine_code, printer_name, print_real),
+                                    daemon=True
+                                ).start()
                             continue
 
                         try:
@@ -963,7 +1276,11 @@ def start_hardware_scanner_listener(server_url: str, machine_code: str):
                                 if c in ('\n', '\t'):
                                     s = "".join(chars)
                                     chars = []
-                                    process_scanned_string(s)
+                                    threading.Thread(
+                                        target=process_scanned_string,
+                                        args=(s, server_url, machine_code, printer_name, print_real),
+                                        daemon=True
+                                    ).start()
                                 elif c:
                                     chars.append(c)
             except Exception as e:
@@ -986,10 +1303,20 @@ def main():
     args = parser.parse_args()
 
     print_banner(args.machine, args.server)
-    print(f"{YELLOW}Initiating telemetry loop... Press Ctrl+C at any time to stop (simulating Power Off){RESET}\n", flush=True)
+    print(f"{YELLOW}Initiating telemetry loop & hardware bridge... Press Ctrl+C at any time to stop.{RESET}\n", flush=True)
 
-    # Start non-blocking hardware QR/Barcode scanner listener
-    start_hardware_scanner_listener(args.server, args.machine)
+    # 1. Start Local WebSocket Bridge on ws://127.0.0.1:8765
+    start_local_websocket_server(
+        host="127.0.0.1", port=8765,
+        server_url=args.server, machine_code=args.machine,
+        printer_name=args.printer, print_real=args.print_real
+    )
+
+    # 2. Start Non-blocking hardware QR scanner listener (HID + Serial)
+    start_hardware_scanner_listener(
+        args.server, args.machine,
+        printer_name=args.printer, print_real=args.print_real
+    )
 
     pulse_count = 0
 
@@ -1000,94 +1327,16 @@ def main():
         success, data, temp, ram = send_heartbeat(args.server, args.machine, args.token, args.printer)
 
         if success:
-            # Check for released print jobs from the kiosk
+            # Check for released print jobs from cloud heartbeat
             jobs = data.get("jobs", [])
             if jobs:
-                # Detect target printer
-                detected = detect_connected_printers(args.printer)
-                chosen_printer = "Default Laser Spooler"
-                is_physically_online = False
-                chosen_port = "USB"
-
-                if detected:
-                    real_printers = [p for p in detected if not any(v in p["name"].lower() for v in ["onenote", "pdf", "xps", "fax"])]
-                    online_printers = [p for p in real_printers if p.get("connected")]
-                    if args.printer:
-                        chosen_printer = args.printer
-                        match = next((p for p in detected if p["name"].lower() == args.printer.lower()), None)
-                        is_physically_online = match.get("connected", True) if match else True
-                        chosen_port = match.get("port", "CUPS/Network") if match else "CUPS/Network"
-                    else:
-                        p_obj = online_printers[0] if online_printers else (real_printers[0] if real_printers else detected[0])
-                        chosen_printer = p_obj["name"]
-                        is_physically_online = p_obj.get("connected", False)
-                        chosen_port = p_obj.get("port", "USB")
-
                 for job in jobs:
-                    order_id = job.get("orderId", "")
-                    order_num = job.get("orderNumber", "ORD-UNKNOWN")
-                    pin_code = str(job.get("pin", "N/A"))
-                    file_name = job.get("fileName", "Document.pdf")
-                    download_url = job.get("downloadUrl", "")
-                    is_test_print = bool(job.get("isTestPrint", False))
-
-                    if is_test_print:
-                        print(f"\n{YELLOW}{BOLD}================================================================{RESET}", flush=True)
-                        print(f"{YELLOW}{BOLD}   [*] HARDWARE TEST PRINT TRIGGERED FROM ADMIN OPS!           {RESET}", flush=True)
-                        print(f"{YELLOW}{BOLD}================================================================{RESET}", flush=True)
-                        print(f"  {BOLD}Job Type:{RESET}       {CYAN}ALIGNMENT & FEEDER TEST SHEET (Black & White){RESET}", flush=True)
-                    else:
-                        print(f"\n{GREEN}{BOLD}================================================================{RESET}", flush=True)
-                        print(f"{GREEN}{BOLD}   [*] NEW PRINT JOB RELEASED FROM KIOSK TOUCHSCREEN!           {RESET}", flush=True)
-                        print(f"{GREEN}{BOLD}================================================================{RESET}", flush=True)
-                    print(f"  {BOLD}Order Number:{RESET}   {CYAN}{order_num}{RESET}", flush=True)
-                    print(f"  {BOLD}Document:{RESET}       {file_name}", flush=True)
-                    print(f"  {BOLD}Pages / Copy:{RESET}   {job.get('pages')} pages | {job.get('copies')} copy | {job.get('paperSize', 'A4')}", flush=True)
-                    print(f"  {BOLD}Print Mode:{RESET}     {job.get('colorMode', 'bw').upper()} (Duplex: {job.get('duplexMode', 'single').upper()})", flush=True)
-                    print(f"  {BOLD}PIN Verified:{RESET}   {pin_code}", flush=True)
-
-                    pages_count = max(1, int(job.get("pages") or job.get("sheets") or 1))
-                    is_blank_order = ('blank' in file_name.lower()) or ('blank' in str(order_num).lower())
-
-                    # 1. Download file to secure local memory spool
-                    try:
-                        local_file, file_bytes = download_job_file(args.server, download_url, order_num, file_name, pages_count=pages_count)
-                        print(f"  {BOLD}File Download:{RESET}  {GREEN}[OK] {file_bytes:,} bytes → {os.path.basename(local_file)}{RESET}", flush=True)
-                    except RuntimeError as dl_fatal:
-                        print(f"  {RED}[FATAL] Download failed: {dl_fatal}{RESET}", flush=True)
-                        report_job_ack(args.server, order_id, order_num, pin_code, False, f"Download failed: {dl_fatal}")
-                        print(f"{RED}{BOLD}================================================================{RESET}\n", flush=True)
-                        continue
-
-                    # 2. Spool to Target Printer with real hardware presence indicator
-                    cable_status = f"{GREEN}[PHYSICALLY CONNECTED - {chosen_port}]{RESET}" if is_physically_online else f"{RED}[USB CABLE UNPLUGGED - Offline]{RESET}"
-                    print(f"  {BOLD}Printer Target:{RESET}{YELLOW}{chosen_printer}{RESET} {cable_status}", flush=True)
-
-                    if is_blank_order:
-                        is_duplex = False  # Simplex: Every blank sheet must be an individual physical paper
-                        page_ranges = "all"
-                        copies_count = 1
-                        print(f"  {CYAN}[BLANK A4 DISPENSER]{RESET} Dispensing {pages_count} clean blank A4 sheet(s) directly from paper tray...", flush=True)
-                    else:
-                        raw_duplex = str(job.get("duplexMode") or job.get("duplex_mode") or "").strip().lower()
-                        is_duplex = bool(raw_duplex in ["duplex", "double", "two-sided", "both", "duplexnotumble"])
-                        copies_count = max(1, int(job.get("copies") or 1))
-                        page_ranges = str(job.get("pageRanges") or job.get("page_ranges") or job.get("selected_page_ranges") or "all").strip()
-
-                    spool_ok, spool_msg = dispatch_to_printer(local_file, chosen_printer, args.print_real, is_physically_online, is_test_print=is_test_print, is_duplex=is_duplex, copies=copies_count, page_ranges=page_ranges)
-                    time.sleep(0.5)
-                    spool_color = GREEN if spool_ok else RED
-                    print(f"  {BOLD}Hardware Spool:{RESET}{spool_color}[{'SUCCESS' if spool_ok else 'ALERT'}] {spool_msg}{RESET}", flush=True)
-
-                    # Send ACK to Cloud so Kiosk Touchscreen completes in real-time
-                    report_job_ack(args.server, order_id, order_num, pin_code, spool_ok, spool_msg)
-                    ack_color = GREEN if spool_ok else RED
-                    print(f"  {BOLD}Cloud ACK:{RESET}      {ack_color}[CONFIRMED] Reported CUPS status to Next.js API{RESET}", flush=True)
-
-                    # 3. Real DoD 5220.22-M Zero-Wipe File Shredder
-                    wiped_bytes = dod_5220_shred_file(local_file)
-                    print(f"  {BOLD}Privacy Shred:{RESET}  {GREEN}DoD 5220.22-M Zero-Wipe Verified: {wiped_bytes:,} bytes shredded (0 Bytes Left on Disk){RESET}", flush=True)
-                    print(f"{GREEN}{BOLD}================================================================{RESET}\n", flush=True)
+                    if not IS_BUSY:
+                        threading.Thread(
+                            target=execute_order_print_flow,
+                            args=(job, args.server, args.machine, args.printer, args.print_real),
+                            daemon=True
+                        ).start()
 
             config = data.get("config", {})
             bw_cap = "[OK] B&W" if config.get("supportsBw") else "[X] B&W"

@@ -421,11 +421,139 @@ export default function AutonomousTouchscreenKiosk() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentScreen, handleScannedQrData, enteredPin]);
 
-  // ── LIVE SERVER-SYNCED SCAN LISTENER (Captures Pi Hardware Scans Instantly) ──
+  // ── LOCAL HARDWARE WEBSOCKET BRIDGE (Raspberry Pi 5 on ws://127.0.0.1:8765) ──
+  const [isHardwareWsConnected, setIsHardwareWsConnected] = useState<boolean>(false);
+  const localWsRef = useRef<WebSocket | null>(null);
   const lastProcessedOrderIdRef = useRef<string>('');
 
   useEffect(() => {
-    if (currentScreen !== 'ready_to_scan') return;
+    let ws: WebSocket | null = null;
+    let reconnectTimer: NodeJS.Timeout | null = null;
+    let isDisposed = false;
+
+    const connectBridge = () => {
+      if (typeof window === 'undefined') return;
+
+      try {
+        ws = new WebSocket('ws://127.0.0.1:8765');
+        localWsRef.current = ws;
+
+        ws.onopen = () => {
+          if (isDisposed) return;
+          console.log('[HARDWARE BRIDGE] Connected to Raspberry Pi 5 daemon on ws://127.0.0.1:8765');
+          setIsHardwareWsConnected(true);
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            console.log('[HARDWARE BRIDGE EVENT]', msg);
+
+            switch (msg.type) {
+              case 'SCAN_START':
+                playTouchTone(1200, 0.15);
+                setIsVerifyingOrder(true);
+                setScanError(null);
+                setScanAlert(null);
+                break;
+
+              case 'ORDER_VERIFIED':
+                setIsVerifyingOrder(false);
+                if (msg.order) {
+                  lastProcessedOrderIdRef.current = msg.order.id;
+                  setActiveOrder(msg.order);
+                  setCurrentScreen('order_details');
+                  playTouchTone(1320, 0.25);
+                  setAutoPrintCountdown(3);
+                }
+                break;
+
+              case 'PRINT_PROGRESS':
+                setIsVerifyingOrder(false);
+                setCurrentScreen('printing');
+                if (typeof msg.progress === 'number') {
+                  setPrintProgress(msg.progress);
+                }
+                if (typeof msg.step === 'number') {
+                  setPrintStep(msg.step);
+                }
+                break;
+
+              case 'PRINT_COMPLETE':
+                setPrintProgress(100);
+                setPrintStep(4);
+                playTouchTone(1320, 0.4);
+                setTimeout(() => {
+                  setCurrentScreen('collect_documents');
+                }, 800);
+                break;
+
+              case 'SCAN_ALERT':
+                setIsVerifyingOrder(false);
+                playTouchTone(220, 0.4);
+                setScanAlert({
+                  type: msg.alertType || 'SCAN_ERROR',
+                  orderNumber: msg.orderNumber,
+                  fileName: msg.fileName,
+                  message: msg.error || 'Scan error',
+                  tamilMessage: msg.tamilMessage || msg.error,
+                });
+                setTimeout(() => {
+                  setScanAlert(null);
+                }, 7000);
+                break;
+
+              case 'BUSY_ALERT':
+                playTouchTone(220, 0.25);
+                setScanAlert({
+                  type: 'KIOSK_BUSY',
+                  message: msg.message || 'Kiosk is currently printing. Please wait for paper to exit.',
+                  tamilMessage: 'மெஷின் தற்போது பிரிண்ட் செய்து கொண்டிருக்கிறது. தயவுசெய்து காத்திருக்கவும்.',
+                });
+                setTimeout(() => {
+                  setScanAlert(null);
+                }, 4000);
+                break;
+
+              case 'RESET_TO_READY':
+                resetToReady();
+                break;
+            }
+          } catch (e) {
+            console.warn('[HARDWARE BRIDGE] Message parse error:', e);
+          }
+        };
+
+        ws.onclose = () => {
+          if (isDisposed) return;
+          setIsHardwareWsConnected(false);
+          localWsRef.current = null;
+          reconnectTimer = setTimeout(connectBridge, 3000);
+        };
+
+        ws.onerror = () => {
+          if (ws) ws.close();
+        };
+      } catch {
+        if (!isDisposed) {
+          reconnectTimer = setTimeout(connectBridge, 3000);
+        }
+      }
+    };
+
+    connectBridge();
+
+    return () => {
+      isDisposed = true;
+      if (ws) ws.close();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      localWsRef.current = null;
+    };
+  }, []);
+
+  // ── SERVER-SYNCED HTTP FALLBACK LISTENER (Active when WebSocket is not used) ──
+  useEffect(() => {
+    if (currentScreen !== 'ready_to_scan' || isHardwareWsConnected) return;
 
     const syncTimer = setInterval(async () => {
       try {
@@ -462,7 +590,7 @@ export default function AutonomousTouchscreenKiosk() {
     }, 1000);
 
     return () => clearInterval(syncTimer);
-  }, [currentScreen, machineCode]);
+  }, [currentScreen, machineCode, isHardwareWsConnected]);
 
   // ── TRIGGER REAL PRINTING SEQUENCE (SYNCHRONIZED WITH CUPS) ──
   const startPrintingSequence = async () => {
@@ -499,7 +627,21 @@ export default function AutonomousTouchscreenKiosk() {
     setPrintProgress(40);
     setPrintStep(2); // Printing / Spooling
 
-    // 2. Poll CUPS hardware confirmation from /api/kiosk/job-status
+    // If local hardware WebSocket bridge is active, CUPS progress is streamed directly
+    if (isHardwareWsConnected) {
+      try {
+        localWsRef.current?.send(JSON.stringify({
+          type: 'TRIGGER_RELEASE',
+          orderId: activeOrder?.id,
+          orderNumber: activeOrder?.orderNumber,
+          pin: activeOrder?.fourDigitPin,
+          machineCode,
+        }));
+      } catch {}
+      return;
+    }
+
+    // 2. HTTP Fallback: Poll CUPS hardware confirmation from /api/kiosk/job-status
     let attempts = 0;
     const maxAttempts = 60; // 60 * 750ms = 45 seconds max
     const checkInterval = 750;
@@ -764,18 +906,27 @@ export default function AutonomousTouchscreenKiosk() {
 
               </div>
 
-              {/* Security Alert: Already Used / Printed Pass */}
+              {/* Security Alert: Error / Already Used / Kiosk Busy */}
               {scanAlert && (
-                <div className="w-full max-w-lg p-2.5 rounded-2xl bg-rose-50 border-2 border-rose-300 shadow-md flex flex-col items-center text-center space-y-1 animate-in zoom-in-95 duration-150 z-30">
+                <div className="w-full max-w-lg p-3 rounded-2xl bg-rose-50 border-2 border-rose-300 shadow-md flex flex-col items-center text-center space-y-1 animate-in zoom-in-95 duration-150 z-30">
                   <div className="flex items-center gap-2 text-rose-700">
                     <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600 animate-pulse" />
                     <h3 className="text-xs sm:text-sm font-black text-rose-950">
-                      QR பாஸ் ஏற்கனவே பயன்படுத்தப்பட்டுவிட்டது!
+                      {scanAlert.type === 'KIOSK_BUSY'
+                        ? 'மெஷின் தற்போது பயன்பாட்டில் உள்ளது (Kiosk Busy)'
+                        : scanAlert.type === 'ALREADY_USED'
+                        ? 'QR பாஸ் ஏற்கனவே பயன்படுத்தப்பட்டுவிட்டது!'
+                        : 'ஸ்கேன் பிழை (Scan Alert)'}
                     </h3>
                   </div>
-                  <p className="text-[10px] sm:text-[11px] font-semibold text-rose-700 leading-tight">
-                    {scanAlert.tamilMessage || 'இந்த QR பாஸ் ஏற்கனவே பிரிண்ட் செய்யப்பட்டு விட்டது! மறுமுறை பயன்படுத்த முடியாது.'}
+                  <p className="text-[10px] sm:text-[11px] font-bold text-rose-800 leading-tight">
+                    {scanAlert.tamilMessage || scanAlert.message}
                   </p>
+                  {scanAlert.message && scanAlert.tamilMessage && scanAlert.message !== scanAlert.tamilMessage && (
+                    <p className="text-[9px] text-slate-600 font-medium">
+                      {scanAlert.message}
+                    </p>
+                  )}
                   <button
                     onClick={() => setScanAlert(null)}
                     className="text-[10px] font-bold text-rose-600 underline hover:text-rose-800 cursor-pointer pt-0.5"

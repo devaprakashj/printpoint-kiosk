@@ -171,6 +171,7 @@ export async function POST(req: NextRequest) {
       orderStatus: 'printing',
       deliveryConfirmed: false,
       secureFileShredded: false,
+      job: jobPayload,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
