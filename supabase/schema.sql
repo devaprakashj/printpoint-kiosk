@@ -113,3 +113,24 @@ CREATE INDEX IF NOT EXISTS idx_orders_pin ON orders(four_digit_pin);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(order_status, payment_status);
 CREATE INDEX IF NOT EXISTS idx_machines_code ON machines(machine_code);
 
+-- 7. KIOSK LIVE STATE TABLE (Shared across all Vercel serverless containers)
+-- Solves the critical cross-container state isolation bug: Vercel spawns multiple
+-- independent serverless containers; in-memory state is NOT shared between them.
+-- This table is the single source of truth for the kiosk UI screen state.
+CREATE TABLE IF NOT EXISTS kiosk_states (
+    machine_code TEXT PRIMARY KEY,                -- e.g. "RIT-ATM-01"
+    current_screen TEXT DEFAULT 'ready_to_scan',  -- Mirrors KioskScreen type
+    is_scanner_active BOOLEAN DEFAULT TRUE,
+    is_verifying BOOLEAN DEFAULT FALSE,
+    print_progress INT,                           -- 0-100
+    print_step INT,                               -- 1-4
+    active_order JSONB,                           -- Full order object for order_details screen
+    scan_alert JSONB,                             -- Alert payload for error overlays
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_kiosk_states_updated ON kiosk_states(updated_at DESC);
+
+-- Add updated_at to orders if not present (needed for recent-order fallback query)
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+CREATE INDEX IF NOT EXISTS idx_orders_updated ON orders(machine_code, updated_at DESC);
