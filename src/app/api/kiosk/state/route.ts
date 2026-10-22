@@ -7,21 +7,45 @@ export const dynamic = 'force-dynamic';
 // In-memory real-time state cache for Kiosk display screens
 const kioskScreenStates: Record<
   string,
-  { currentScreen: string; isScannerActive: boolean; updatedAt: number }
+  {
+    currentScreen: string;
+    isScannerActive: boolean;
+    isVerifying?: boolean;
+    printProgress?: number;
+    printStep?: number;
+    updatedAt: number;
+  }
 > = {};
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { machineCode, currentScreen, isScannerActive, clearActiveOrder, clearScanAlert } = body;
+    const {
+      machineCode,
+      currentScreen,
+      isScannerActive,
+      clearActiveOrder,
+      clearScanAlert,
+      activeOrder,
+      scanAlert,
+      isVerifying,
+      printProgress,
+      printStep,
+    } = body;
 
     if (!machineCode) {
       return NextResponse.json({ success: false, error: 'machineCode is required' }, { status: 400 });
     }
 
     const cleanCode = String(machineCode).trim().toUpperCase();
-    const active = isScannerActive !== undefined ? Boolean(isScannerActive) : currentScreen === 'scan_qr';
+    const active = isScannerActive !== undefined ? Boolean(isScannerActive) : currentScreen === 'scan_qr' || currentScreen === 'ready_to_scan';
 
+    if (activeOrder) {
+      db.setMachineLiveActiveOrder(cleanCode, activeOrder);
+    }
+    if (scanAlert) {
+      db.setMachineLiveScanAlert(cleanCode, scanAlert);
+    }
     if (clearActiveOrder) {
       db.clearMachineLiveActiveOrder(cleanCode);
     }
@@ -30,8 +54,11 @@ export async function POST(req: NextRequest) {
     }
 
     kioskScreenStates[cleanCode] = {
-      currentScreen: String(currentScreen || 'home'),
+      currentScreen: String(currentScreen || 'ready_to_scan'),
       isScannerActive: active,
+      isVerifying: isVerifying !== undefined ? Boolean(isVerifying) : false,
+      printProgress: typeof printProgress === 'number' ? printProgress : undefined,
+      printStep: typeof printStep === 'number' ? printStep : undefined,
       updatedAt: Date.now(),
     };
 
@@ -40,6 +67,8 @@ export async function POST(req: NextRequest) {
       machineCode: cleanCode,
       currentScreen: kioskScreenStates[cleanCode].currentScreen,
       isScannerActive: kioskScreenStates[cleanCode].isScannerActive,
+      isVerifying: kioskScreenStates[cleanCode].isVerifying,
+      printProgress: kioskScreenStates[cleanCode].printProgress,
     });
   } catch (err: unknown) {
     const error = err instanceof Error ? err.message : 'Failed to update kiosk state';
@@ -121,6 +150,9 @@ export async function GET(req: NextRequest) {
       machineCode: cleanCode,
       currentScreen: state.currentScreen,
       isScannerActive: state.isScannerActive,
+      isVerifying: Boolean(state.isVerifying),
+      printProgress: state.printProgress,
+      printStep: state.printStep,
       activeOrder: liveActiveOrder,
       scanAlert: scanAlert,
       ageSeconds: Math.round((Date.now() - state.updatedAt) / 1000),

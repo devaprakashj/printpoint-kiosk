@@ -412,8 +412,12 @@ export default function AutonomousTouchscreenKiosk() {
         barcodeBufferRef.current += e.key;
         if (barcodeTimerRef.current) clearTimeout(barcodeTimerRef.current);
         barcodeTimerRef.current = setTimeout(() => {
+          const buffered = barcodeBufferRef.current.trim();
+          if (buffered.length >= 4) {
+            handleScannedQrData(buffered);
+          }
           barcodeBufferRef.current = '';
-        }, 500);
+        }, 300);
       }
     };
 
@@ -553,15 +557,16 @@ export default function AutonomousTouchscreenKiosk() {
 
   // ── SERVER-SYNCED HTTP FALLBACK LISTENER (Active when WebSocket is not used) ──
   useEffect(() => {
-    if (currentScreen !== 'ready_to_scan' || isHardwareWsConnected) return;
+    if (isHardwareWsConnected) return;
 
     const syncTimer = setInterval(async () => {
       try {
         const res = await fetch(`/api/kiosk/state?machineCode=${machineCode}`, { cache: 'no-store' });
         const data = await res.json();
+        if (!data.success) return;
 
         // 1. Check for Already-Used / Security Scan Alert from Pi hardware scan
-        if (data.success && data.scanAlert && currentScreen === 'ready_to_scan') {
+        if (data.scanAlert && currentScreen === 'ready_to_scan') {
           playTouchTone(220, 0.4);
           setScanAlert(data.scanAlert);
           setTimeout(() => {
@@ -574,17 +579,56 @@ export default function AutonomousTouchscreenKiosk() {
           }, 7000);
         }
 
-        // 2. Check for active valid order release
-        if (data.success && data.activeOrder && currentScreen === 'ready_to_scan') {
+        // 2. Hardware Scanner Scanning Verification state
+        if ((data.isVerifying || data.currentScreen === 'verifying_order') && currentScreen === 'ready_to_scan') {
+          playTouchTone(1200, 0.15);
+          setIsVerifyingOrder(true);
+        }
+
+        // 3. Check for active valid order release -> Order Details
+        if (data.activeOrder && (currentScreen === 'ready_to_scan' || currentScreen === 'enter_pin')) {
           const ord = data.activeOrder;
           if (ord.id && ord.id !== lastProcessedOrderIdRef.current) {
             lastProcessedOrderIdRef.current = ord.id;
+            setIsVerifyingOrder(false);
             playTouchTone(1320, 0.25);
             setScanAlert(null);
             setActiveOrder(ord);
             setCurrentScreen('order_details');
             setAutoPrintCountdown(3);
           }
+        }
+
+        // 4. Remote Print Progress
+        if (data.currentScreen === 'printing' && currentScreen !== 'printing') {
+          setIsVerifyingOrder(false);
+          setCurrentScreen('printing');
+          if (typeof data.printProgress === 'number') {
+            setPrintProgress(data.printProgress);
+          }
+          if (typeof data.printStep === 'number') {
+            setPrintStep(data.printStep);
+          }
+        } else if (data.currentScreen === 'printing' && currentScreen === 'printing') {
+          if (typeof data.printProgress === 'number') {
+            setPrintProgress(data.printProgress);
+          }
+          if (typeof data.printStep === 'number') {
+            setPrintStep(data.printStep);
+          }
+        }
+
+        // 5. Remote Print Complete -> Collect Documents
+        if (data.currentScreen === 'collect_documents' && currentScreen !== 'collect_documents') {
+          setPrintProgress(100);
+          setPrintStep(4);
+          playTouchTone(1320, 0.4);
+          setCurrentScreen('collect_documents');
+        }
+
+        // 6. Reset to Ready
+        if (data.currentScreen === 'ready_to_scan' && currentScreen === 'collect_documents') {
+          resetToReady();
         }
       } catch {}
     }, 1000);

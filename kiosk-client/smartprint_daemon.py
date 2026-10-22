@@ -773,6 +773,30 @@ def broadcast_ws(payload: dict):
         pass
 
 
+def sync_cloud_state(server_url: str, machine_code: str, payload: dict):
+    """Sends immediate state sync to cloud Next.js server so Kiosk screen transitions reliably."""
+    if not server_url or not machine_code:
+        return
+    try:
+        url = f"{server_url.rstrip('/')}/api/kiosk/state"
+        body = {"machineCode": machine_code, **payload}
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body).encode('utf-8'),
+            headers={"Content-Type": "application/json", "User-Agent": "SmartPrint-Pi5-StateSync/1.0"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            pass
+    except Exception:
+        pass
+
+
+def post_cloud_state(server_url: str, machine_code: str, payload: dict):
+    """Dispatches cloud state update on a background thread so print flow is never blocked."""
+    threading.Thread(target=sync_cloud_state, args=(server_url, machine_code, payload), daemon=True).start()
+
+
 def start_local_websocket_server(host="127.0.0.1", port=8765, server_url="", machine_code="", printer_name="", print_real=False):
     """Starts local async WebSocket server on ws://127.0.0.1:8765 for real-time kiosk browser UI events."""
     global WS_EVENT_LOOP, WS_SERVER_RUNNING
@@ -866,6 +890,7 @@ def execute_order_print_flow(order_or_job: dict, server_url: str, machine_code: 
 
         # Step 1: Claim order via /api/pin/release
         broadcast_ws({"type": "PRINT_PROGRESS", "progress": 15, "step": 1})
+        post_cloud_state(server_url, machine_code, {"currentScreen": "printing", "printProgress": 15, "printStep": 1})
 
         rel_url = f"{server_url.rstrip('/')}/api/pin/release"
         rel_payload = {
@@ -910,12 +935,14 @@ def execute_order_print_flow(order_or_job: dict, server_url: str, machine_code: 
 
         # Step 2: Download document
         broadcast_ws({"type": "PRINT_PROGRESS", "progress": 30, "step": 1})
+        post_cloud_state(server_url, machine_code, {"currentScreen": "printing", "printProgress": 30, "printStep": 1})
         is_blank_order = ('blank' in file_name.lower()) or ('blank' in str(order_num).lower())
         local_file, file_bytes = download_job_file(server_url, download_url, order_num, file_name, pages_count=pages_count)
         print(f"  {BOLD}Spool File:{RESET}     {GREEN}[OK] {file_bytes:,} bytes → {os.path.basename(local_file)}{RESET}", flush=True)
 
         # Step 3: Spooling to printer
         broadcast_ws({"type": "PRINT_PROGRESS", "progress": 45, "step": 2})
+        post_cloud_state(server_url, machine_code, {"currentScreen": "printing", "printProgress": 45, "printStep": 2})
 
         detected = detect_connected_printers(printer_name)
         target_printer = printer_name or "Kyocera_3212i"
@@ -931,6 +958,7 @@ def execute_order_print_flow(order_or_job: dict, server_url: str, machine_code: 
 
         def on_cups_progress(pct, step):
             broadcast_ws({"type": "PRINT_PROGRESS", "progress": pct, "step": step})
+            post_cloud_state(server_url, machine_code, {"currentScreen": "printing", "printProgress": pct, "printStep": step})
 
         if is_blank_order:
             is_duplex = False
@@ -946,6 +974,7 @@ def execute_order_print_flow(order_or_job: dict, server_url: str, machine_code: 
         if spool_ok:
             # Step 4: Complete
             broadcast_ws({"type": "PRINT_COMPLETE", "progress": 100, "step": 4})
+            post_cloud_state(server_url, machine_code, {"currentScreen": "collect_documents", "printProgress": 100, "printStep": 4})
             report_job_ack(server_url, order_id, order_num, pin_code, True, spool_msg)
             wiped_bytes = dod_5220_shred_file(local_file)
             print(f"  {BOLD}Privacy Shred:{RESET}  {GREEN}DoD 5220.22-M Zero-Wipe Verified: {wiped_bytes:,} bytes shredded (0 Bytes Left on Disk){RESET}", flush=True)
@@ -954,6 +983,7 @@ def execute_order_print_flow(order_or_job: dict, server_url: str, machine_code: 
             # Wait 8s for customer collection countdown (matches UI screen)
             time.sleep(8.0)
             broadcast_ws({"type": "RESET_TO_READY"})
+            post_cloud_state(server_url, machine_code, {"currentScreen": "ready_to_scan", "clearActiveOrder": True})
         else:
             broadcast_ws({
                 "type": "SCAN_ALERT",
@@ -961,10 +991,18 @@ def execute_order_print_flow(order_or_job: dict, server_url: str, machine_code: 
                 "error": f"Printer Spool Error: {spool_msg}",
                 "tamilMessage": "பிரிண்ட் செய்வதில் பிழை ஏற்பட்டது. தயவுசெய்து கியோஸ்க் நிர்வாகியை அணுகவும்."
             })
+            post_cloud_state(server_url, machine_code, {
+                "scanAlert": {
+                    "type": "PRINT_ERROR",
+                    "message": f"Printer Spool Error: {spool_msg}",
+                    "tamilMessage": "பிரிண்ட் செய்வதில் பிழை ஏற்பட்டது. தயவுசெய்து கியோஸ்க் நிர்வாகியை அணுகவும்."
+                }
+            })
             report_job_ack(server_url, order_id, order_num, pin_code, False, spool_msg)
             dod_5220_shred_file(local_file)
             time.sleep(7.0)
             broadcast_ws({"type": "RESET_TO_READY"})
+            post_cloud_state(server_url, machine_code, {"currentScreen": "ready_to_scan", "clearActiveOrder": True, "clearScanAlert": True})
 
     except Exception as e:
         print(f"  {RED}[PRINT FLOW ERROR] {e}{RESET}", flush=True)
@@ -974,8 +1012,16 @@ def execute_order_print_flow(order_or_job: dict, server_url: str, machine_code: 
             "error": str(e),
             "tamilMessage": "பிரிண்ட் செய்வதில் எதிர்பாராத பிழை ஏற்பட்டது."
         })
+        post_cloud_state(server_url, machine_code, {
+            "scanAlert": {
+                "type": "PRINT_ERROR",
+                "message": str(e),
+                "tamilMessage": "பிரிண்ட் செய்வதில் எதிர்பாராத பிழை ஏற்பட்டது."
+            }
+        })
         time.sleep(7.0)
         broadcast_ws({"type": "RESET_TO_READY"})
+        post_cloud_state(server_url, machine_code, {"currentScreen": "ready_to_scan", "clearActiveOrder": True, "clearScanAlert": True})
     finally:
         with BUSY_LOCK:
             IS_BUSY = False
@@ -1006,6 +1052,7 @@ def process_scanned_string(scanned_str: str, server_url: str, machine_code: str,
     print(f"\n{GREEN}{BOLD}[QR SCANNED - READY TO SCAN]{RESET} Raw input: {scanned_str[:120]}", flush=True)
     # Immediately shift UI to Verifying Order
     broadcast_ws({"type": "SCAN_START"})
+    post_cloud_state(server_url, machine_code, {"currentScreen": "verifying_order", "isVerifying": True})
 
     pin = None
     order_id = None
@@ -1079,8 +1126,17 @@ def process_scanned_string(scanned_str: str, server_url: str, machine_code: str,
             "orderNumber": order_num or "",
             "fileName": ""
         })
+        post_cloud_state(server_url, machine_code, {
+            "scanAlert": {
+                "type": alert_type,
+                "message": err_msg,
+                "tamilMessage": tamil_msg,
+                "orderNumber": order_num or ""
+            }
+        })
         time.sleep(7.0)
         broadcast_ws({"type": "RESET_TO_READY"})
+        post_cloud_state(server_url, machine_code, {"currentScreen": "ready_to_scan", "clearActiveOrder": True, "clearScanAlert": True})
         return
 
     # Order verified successfully!
@@ -1094,6 +1150,11 @@ def process_scanned_string(scanned_str: str, server_url: str, machine_code: str,
     broadcast_ws({
         "type": "ORDER_VERIFIED",
         "order": verified_order
+    })
+    post_cloud_state(server_url, machine_code, {
+        "currentScreen": "order_details",
+        "isVerifying": False,
+        "activeOrder": verified_order
     })
 
     # Countdown wait for non-touchscreen display
